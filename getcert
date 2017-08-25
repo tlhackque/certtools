@@ -1,0 +1,100 @@
+#!/bin/bash
+
+# Copyright (C) 2017 Timothe Litt, litt _at__ acm ddot org
+#
+# Get SSL/TLS certificate from a server
+
+VERSION="1.0.0"
+
+SELF="`basename $0`"
+
+PORT=443
+DUMP=cat
+ALL=
+CIPHER=
+STARTTLS=
+OUTPUT=
+
+function usage() {
+    cat <<EOF
+Usage: $SELF [-acdophs] server
+
+ Get SSL/TLS certificate from server & output as PEM
+ V$VERSION
+
+ Options:
+  a             Report all certificates (including intermediates)
+  c: cipher     Cipher list (man ciphers/openssl ciphers)
+  d             Decode certificate (as well as PEM)
+  o FILE        Output to FILE
+  p: port       Port number for connection
+  s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
+
+ Establishes an SSL/TLS connection to the specified server and obtains
+ the server's X.509 certificate.  The certificate (in PEM) format is
+ written to stdout (or FILE), optionally with text decoding.
+
+ When working with dual-certificate servers, use -c RSA and -c ECDSA to
+ select the desired certificate.  An arbitrary list can be specified.
+
+ Requires: OpenSSL
+
+See LICENSE for license.
+EOF
+    exit 1;
+}
+
+while getopts ac:dho:p:s: opt; do
+    case $opt in
+        a)
+            ALL="-showcerts"
+            ;;
+        c)
+            CIPHER="-cipher $OPTARG"
+            ;;
+        d)
+            DUMP="openssl x509 -text"
+            ;;
+        o)
+            OUTPUT="$OPTARG"
+            ;;
+        p)
+            PORT="$OPTARG"
+            ;;
+        s)
+            STARTTLS="-starttls $OPTARG"
+            ;;
+        h)
+            usage
+            ;;
+        *)
+            echo "$SELF -h for usage" >&2
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ -n "$ALL" ] && [ "$DUMP" != "cat" ]; then
+    # OpenSSL restriction - x509 only processes one certificate
+    # and it's too much trouble to split a chain for decoding.
+    echo "-a can not be used with -d" >&2
+    exit 1;
+fi
+
+SERVER="$1"
+[ -n "$SERVER" ] || usage
+shift
+
+[ -n "$OUTPUT" ] && exec >"$OUTPUT"
+
+openssl s_client -connect "$SERVER:$PORT" -servername "$SERVER" $CIPHER \
+    $ALL $STARTTLS </dev/null 2>/dev/null |                             \
+    sed -ne'/^-----BEGIN/,/^-----END/p' | $DUMP
+# Currently, s_client doesn't exit non-zero if connection fails.
+# But it might someday.
+if [ ${PIPESTATUS[0]} != 0 ]; then
+    exit ${PIPESTATUS[0]}
+fi
+
+exit ${PIPESTATUS[2]}
