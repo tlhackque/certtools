@@ -1,0 +1,152 @@
+#!/bin/bash
+
+# Copyright (C) 2017, 2020 Timothe Litt <litt@acm.org>
+
+VERSION=1.0.1
+
+SELF="`basename $0`"
+HOSTS="`dirname $0`/ssl_certs"
+
+function info() {
+    # Extract intresting lines; filter excess & reformat
+    local cert=
+    local line=
+    local nl=$'\n'
+    local endcert="^--+END"
+    while IFS='' read line; do
+        cert="$cert$line$nl"
+        if [[ $line =~ $endcert ]]; then
+            <<<"$cert" openssl x509 -noout -text | \
+                grep -PA1 'Issuer:|Not Before:|Not After :|Subject:| X509v3 Subject Alternative Name:| Subject Public Key Info:' |\
+                grep -vP 'Subject Public Key Info:|^--|^\s*Validity$' | \
+                sed -e's/, \([A-Z][A-Z.0-9]*=\)/\n            \1/g;
+s/    Not After :/Expires:/;
+s/    Not Before:/Issued :/;
+s/    X509v3 Subject Alternative Name:/Subject Alternative Name:/;
+s/^        /    /g;
+s/    Public Key Algorithm:/Public Key Algorithm:/g;
+s/, DNS:/,\n            DNS:/g'
+            cert=
+            echo ""
+        fi
+    done
+    <<<"$cert" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
+        sed -e's/^  *//g;s/^/    /g' | sort
+}
+
+function usage() {
+    cat <<EOF
+Usage: $SELF [-C bundle] [-c cipher] [-s proto] [-t tlsver] [host [port]]
+
+Display basic certificate information from a server or file
+V$VERSION
+
+ If no host is specified, $HOSTS is read.  This contains lines HOST [PORT].
+ PORT defaults to 443.
+ If port is FILE, "host" is a PEM filename
+
+ Options:
+  C: bundle     CA bundle file for verification
+  c: cipher     Cipher list (man ciphers/openssl ciphers)
+  s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
+  t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
+
+ Establishes an SSL/TLS connection to the specified server and obtains
+ the server's X.509 certificate and any intermediate certificates offered.
+
+ A summary of the key attributes of each certificate is displayed.
+
+ When working with dual-certificate servers, use -c RSA and -c ECDHA to
+ select the desired certificate.  An arbitrary list can be specified.
+
+ Most errors are silently ignored; I'm too lazy to sort out
+ verification errors, inaccessible host, etc.
+
+ Requires: OpenSSL
+EOF
+    exit
+}
+
+# Process options
+
+CIPHER=
+STARTTLS=
+PROTO=
+CA="/etc/pki/tls/certs/ca_bundle.pem"
+
+while getopts "C:c:hs:t:" opt; do
+    case "$opt" in
+        C)
+            CA="$OPTARG"
+            ;;
+        c)
+            CIPHER="-cipher $OPTARG"
+            ;;
+        h)
+            usage
+            ;;
+        s)
+            STARTTLS="-starttls $OPTARG"
+            ;;
+        t)
+            case "$OPTARG" in
+                ssl) PROTO="-ssl3";;
+                1)   PROTO="-tls1";;
+                1.1) PROTO="-tls1_1";;
+                1.2) PROTO="-tls1_2";;
+                1.3) PROTO="-tls1_3";;
+                *)
+                    echo "$OPTARG: Not ssl, 1, 1.1, 1.2, or 1.3" >&2
+                    exit 1;;
+            esac
+            ;;
+        *)
+            echo "$SELF -h for usage" >&2
+            exit 1
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
+if [ -z "$1" ]; then
+    # Process hosts file
+    egrep -v '(^#|^$)' "$HOSTS" |  while read HOST PORT
+    do
+      if [ "$PORT" = "FILE" ]; then
+          echo "$HOST"
+          if ! [ -r "$HOST" ]; then
+              echo "    Can't read file $HOST" >&2
+              continue
+          fi
+          cat "$HOST" | info
+      else
+          [ -z "$PORT" ] && PORT=443
+          echo "$HOST:$PORT"
+          openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts -CAfile "$CA" $STARTTLS $CIPHER $PROTO \
+              </dev/null 2>/dev/null | info
+      fi
+      echo ""
+    done
+    exit
+fi
+
+
+# Process host on command line
+
+HOST="$1"
+PORT="$2"
+[ -z "$PORT" ] && PORT=443
+
+if [ "$PORT" = "FILE" ]; then
+    echo "$HOST"
+    if ! [ -r "$HOST" ]; then
+        echo "Can't read file $HOST" >&2
+        exit 1
+    fi
+    cat "$HOST" | info
+else
+    echo "$HOST:$PORT"
+    openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts -CAfile "$CA" $STARTTLS $CIPHER $PROTO \
+        </dev/null 2>/dev/null | info
+fi
+echo ""

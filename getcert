@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Copyright (C) 2017 Timothe Litt, litt _at__ acm ddot org
+# Copyright (C) 2017,2020 Timothe Litt, litt _at__ acm ddot org
 #
 # Get SSL/TLS certificate from a server
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 
 SELF="`basename $0`"
 
@@ -14,6 +14,7 @@ ALL=
 CIPHER=
 STARTTLS=
 OUTPUT=
+PROTO=
 
 function usage() {
     cat <<EOF
@@ -29,6 +30,7 @@ Usage: $SELF [-acdophs] server
   o FILE        Output to FILE
   p: port       Port number for connection
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
+  t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 
  Establishes an SSL/TLS connection to the specified server and obtains
  the server's X.509 certificate.  The certificate (in PEM) format is
@@ -44,8 +46,8 @@ EOF
     exit 1;
 }
 
-while getopts ac:dho:p:s: opt; do
-    case $opt in
+while getopts "ac:dho:p:s:t:" opt; do
+    case "$opt" in
         a)
             ALL="-showcerts"
             ;;
@@ -63,6 +65,18 @@ while getopts ac:dho:p:s: opt; do
             ;;
         s)
             STARTTLS="-starttls $OPTARG"
+            ;;
+        t)
+            case "$OPTARG" in
+                ssl) PROTO="-ssl3";;
+                1)   PROTO="-tls1";;
+                1.1) PROTO="-tls1_1";;
+                1.2) PROTO="-tls1_2";;
+                1.3) PROTO="-tls1_3";;
+                *)
+                    echo "$OPTARG: Not ssl, 1, 1.1, 1.2, or 1.3" >&2
+                    exit 1;;
+            esac
             ;;
         h)
             usage
@@ -89,7 +103,7 @@ shift
 [ -n "$OUTPUT" ] && exec >"$OUTPUT"
 
 openssl s_client -connect "$SERVER:$PORT" -servername "$SERVER" $CIPHER \
-    $ALL $STARTTLS </dev/null 2>/dev/null |                             \
+    $ALL $STARTTLS $PROTO </dev/null 2>/dev/null |                             \
     sed -ne'/^-----BEGIN/,/^-----END/p' | $DUMP
 # Currently, s_client doesn't exit non-zero if connection fails.
 # But it might someday.
