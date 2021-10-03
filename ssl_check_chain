@@ -8,7 +8,7 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.001';
+our $VERSION = 'V1.002';
 
 # License is in the POD at the end of this file.
 
@@ -101,8 +101,15 @@ sub checkhost {
     my( $host ) = @_;
 
     my $port;
-    if( $host =~ /^(?:\[[[:xdigit:]:]\]|.*?):([[:digit:]]+)$/ ) {
-        $port = $1;
+    if( $host =~ /^(\[[[:xdigit:]:]\]|.*?):(?:[[:digit:]]+|([[:alnum:].*_-]+))$/ ) {
+        if( $2 ) {
+            $port = getservbyname( $2, 'tcp' );
+            if( $port ) {
+                $host = "$1:$port";
+            } else {
+                die( "$2 is not a known port name, see /etc/services\n" );
+            }
+        }
     } elsif( $starttls =~ /^-starttls (.*)$/ && ( $port = $starttls{$1} ) ) {
         $host .= ":$port";
     } else {
@@ -326,6 +333,8 @@ Prints the manual page and exits.
 =head1 DESCRIPTION
 
 B<ssl_check_chain> will connect to each host specified and obtain its certificate and any intermediate certificate chain.
+
+Port can be numeric, or a service name (e.g. from /etc/services).
 
 If a port is not specified: if --starttls is specified, the default port for the STARTTLS protocol is used, otherwise 444 (https) is assumed.
 The validity dates of each certificate returned will be verified, as will its chain.
