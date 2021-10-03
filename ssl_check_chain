@@ -1,0 +1,414 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+my $copyright = << 'COPYRIGHT';
+Copyright (C) 2021 Timothe Litt <litt at acm.org>
+Use --man for license information.
+COPYRIGHT
+
+our $VERSION = 'V1.001';
+
+# License is in the POD at the end of this file.
+
+use Config( qw/%Config/ );
+use Date::Parse;
+use File::Basename;
+use File::Spec;
+use File::Temp;
+use Getopt::Long( qw/:config bundling/ );
+use POSIX( qw/strftime/ );
+
+my @signo;
+defined $Config{sig_name} and @signo = ( split( ' ', $Config{sig_name} ) );
+
+my $tmpdir  = File::Spec->tmpdir || '.';
+my $CAcerts = '';
+
+my %calocs = ( -CAfile => [qw/SSL_CERT_FILE CURL_CA_BUNDLE/],
+               -CApath => [qw/SSL_CERT_DIR/],
+             );
+for my $opt ( keys %calocs ) {
+    my $vars = $calocs{$opt};
+    foreach my $var ( @$vars ) {
+        if( my $val = $ENV{$var} ) {
+            $CAcerts .= " $opt $val ";
+            last;
+        }
+    }
+}
+
+# s_client supported list of starttls protocols => standard port
+my %starttls = ( "xmpp-server" => 5269, "postgres" => 5432, "smtp"  => 25, "pop3" => 110,
+                 "imap"        => 143,  "ftp"      => 21,   "xmpp"  => 5222,
+                 "irc"         => 194,  "mysql"    => 3306,
+                 "lmtp"        => 24,   "nntp"     => 119,  "sieve" => 2000, "ldap" => 389
+               );
+
+my %tlsver = ( '1.1' => '-tls1_1',            '1.2' => '-tls1_2', '1.3' => '-tls1_3', );
+my %cipher = ( ec    => [qw/ALL !RSA ECDSA/], rsa   => [qw/ALL !ECDSA/] );
+
+my( $cafile, $cadir, $debug, $help, $man, $version, $starttls, $tlsver, $type );
+
+sub docmd {
+    my( $cmd ) = join( '', @_ );
+    printf( ">> %s", $cmd ) if( $debug );
+    my $r = qx($cmd);
+
+    if( $? != 0 && $_[1] ne 'verify' ) {
+        if( $? == -1 ) {
+            printf( "failed to execute %s: $!\n", $cmd );
+        } elsif( $? & 127 ) {
+            printf(
+                "%s died with signal %s (%d), %s coredump\n", $cmd,
+                $signo[ $? & 127 ], ( $? & 127 ), ( $? & 128 ) ? 'with' : 'without' );
+        } else {
+            printf( "%s exited with value %d\n", $cmd, $? >> 8 );
+        }
+        return "$r";
+    }
+    return $r;
+}
+
+sub pdelta {
+    my( $date, $now ) = @_;
+
+    my $day   = 24 * 60 * 60;
+    my $delta = $date - $now;
+    my $d2g   = int( ( abs( $delta ) ) / $day );
+    if( $d2g == 0 ) {
+        return "today";
+    }
+    $d2g = int( ( abs( $delta ) + ( $day - 1 ) ) / $day );
+
+    my $text = "in %d days%s, on %s";
+
+    if( $delta < 0 ) {
+        $text  = "%d days%s ago, on %s";
+        $delta = -$delta;
+    }
+    my $y2g = "";
+    if( $d2g > 366 ) {
+        $y2g = sprintf( " (%.2f years)", $d2g / 365 );
+    }
+    return sprintf(
+        $text, $d2g, $y2g,
+        strftime( '%a %d-%b-%Y at %T %Z', localtime( $date ) ) );
+}
+
+sub checkhost {
+    my( $host ) = @_;
+
+    my $port;
+    if( $host =~ /^(?:\[[[:xdigit:]:]\]|.*?):([[:digit:]]+)$/ ) {
+        $port = $1;
+    } elsif( $starttls =~ /^-starttls (.*)$/ && ( $port = $starttls{$1} ) ) {
+        $host .= ":$port";
+    } else {
+        $host .= ":443";
+    }
+    my $chain = docmd(
+        "openssl ", "s_client",
+        " $CAcerts $starttls -showcerts $tlsver $type -connect $host </dev/null 2>&1\n" );
+    return unless( $chain );
+
+    my @chain = $chain =~ /(^-{2,8}BEGIN.*?^-{2,8}END.*?\n)/msg;
+    return $chain unless( @chain );
+
+    my $text = '';
+    my %cert;
+    my $now = time;
+
+    my $untrusted = '';
+    for( my $i = 0; $i < @chain; ++$i ) {
+        my $file = File::Temp->new( DIR    => $tmpdir, TEMPLATE => "checkchain-$i-XXXXXX",
+                                    SUFFIX => '.pem',  UNLINK   => 1 );
+        $cert{$i}{file} = $file;
+        print $file ( $chain[$i] );
+        $file->flush;
+        my $state = docmd( "openssl ",           "x509",
+                           " -noout -text -in ", "$file\n" );
+        $cert{$i}{subject} = $1 if( $state =~ /^\s*Subject:\s*(.*?)$/m );
+        $cert{$i}{issuer}  = $1 if( $state =~ /^\s*Issuer:\s*(.*?)$/m );
+        $cert{$i}{start} = str2time( $1, 'GMT' )
+            if( $state =~ /^\s*Not Before\s*:\s*(.*?)$/m );
+        $cert{$i}{end} = str2time( $1, 'GMT' )
+            if( $state =~ /^\s*Not After\s*:\s*(.*?)$/m );
+        $cert{$i}{key} = uc $1
+            if( $state =~
+              /^\s*Public Key Algorithm\s*:\s*(?:id-)?(.*?)(?:PublicKey|Encryption)?$/m );
+        $cert{$i}{klen} = $1 if( $state =~ /^\s*(?:RSA )?Public-Key\s*:\s*(.*?)$/m );
+
+        $untrusted .= sprintf( " -untrusted %s", "$file" ) if( $i > 0 );
+    }
+
+    for( my $i = 0; $i < @chain; ++$i ) {
+        $text .= "\n" if( $i > 0 );
+        $text .= sprintf( "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
+                          $cert{$i}{issuer} );
+        $text .= sprintf( "    Type   : %s %s\n", $cert{$i}{key}, $cert{$i}{klen} );
+        if( $now < $cert{$i}{start} || $now > $cert{$i}{end} ) {
+            $text .= "    Certificate is NOT valid at this time\n";
+        }
+        if( $now < $cert{$i}{start} ) {
+            $text .= sprintf(
+                "    Certificate is not yet valid, will be %s\n",
+                pdelta( $cert{$i}{start}, $now ) );
+        } else {
+            $text .= sprintf(
+                "    Certificate became valid %s\n",
+                pdelta( $cert{$i}{start}, $now ) );
+        }
+        if( $now > $cert{$i}{end} ) {
+            $text .=
+                sprintf( "    Certificate expired %s\n", pdelta( $cert{$i}{end}, $now ) );
+        } else {
+            $text .=
+                sprintf( "    Certificate expires %s\n", pdelta( $cert{$i}{end}, $now ) );
+        }
+
+        my $state = docmd( "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
+                           " 2>&1\n" );
+        chomp $state;
+
+        if( my( $subj, $err, $depth, $text ) = $state =~
+            /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m ) {
+            if( $subj eq $cert{$i}{issuer} ) {
+                $state =
+"Failed to verify issuer certificate:\n  $subj\n  SSL error: $err : \"$text\" at depth $depth";
+            }
+        }
+        $state =~ s,$tmpdir/.*?\.pem: ,,g;
+        $state = "Verify result: " . $state;
+        $state =~ s/^/    /gm;
+        $text .= $state . "\n";
+    }
+    return $text;
+}
+
+GetOptions(
+    "CAfile=s"       => \$cafile,
+    "CApath|CAdir=s" => \$cadir,
+    "debug|d"        => \$debug,
+    "starttls=s"     => \$starttls,
+    "tlsversion=s"   => \$tlsver,
+    "type=s"         => \$type,
+    'help|?|h'       => \$help,
+    man              => \$man,
+    version          => \$version,
+
+          ) or die( "Command line error, --help for usage\n" );
+if( $help || $man ) {
+    eval {
+        no warnings 'once';
+        $Pod::Usage::Formatter = 'Pod::Text::Termcap';
+        require Pod::Usage;
+        } or
+        die( "Install Pod::Usage or use 'perldoc $0'\n" );
+
+    Pod::Usage::pod2usage( 1 ) if( $help );
+    Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if $man;
+}
+if( $version ) {
+    print( basename( $0 ) . " version $VERSION\n$copyright" );
+    exit;
+}
+
+if( defined $cafile || defined $cadir ) {
+    $CAcerts = '';
+    $CAcerts .= " -CAfile $cafile"
+        if( defined $cafile );
+    $CAcerts .= " -CApath $cadir"
+        if( defined $cadir );
+}
+if( defined $starttls ) {
+    die "Unsupported STARTTLS protocol: $starttls\n" unless( $starttls{$starttls} );
+    $starttls = "-starttls $starttls";
+} else {
+    $starttls = '';
+}
+if( defined $tlsver ) {
+    die "Unsupported TLS version\n" unless( ( $tlsver = $tlsver{$tlsver} ) );
+} else {
+    $tlsver = '';
+}
+if( defined $type ) {
+    $type = lc $type;
+    my $list = $cipher{$type};
+    die "Unspported cipher type $type\n" unless( $list );
+    if( $tlsver !~ /_1_3$/ ) {
+        $tlsver = '-tls1_2' unless( $tlsver );
+        $type   = "-cipher " . join( ':', @$list );
+    } elsif( $type ne 'ec' ) {
+        die "TLS 1.3 doesn't support $type\n";
+    }
+} else {
+    $type = '';
+}
+
+if( @ARGV > 1 ) {
+    my $i = 0;
+    foreach my $host ( @ARGV ) {
+        print( "\n" ) if( $i++ );
+        printf( "%s\n%s\n", $host, '-' x length( $host ) );
+        my $txt = checkhost( $host );
+        $txt =~ s/^/  /mg;
+        print( $txt );
+    }
+} elsif( @ARGV ) {
+    print( checkhost( $ARGV[0] ) );
+} else {
+    eval { require Pod::Usage; } or die( "See " . basename( $0 ) . " --help\n" );
+    Pod::Usage::pod2usage( 1 );
+}
+
+__END__
+
+=head1 SSL_CHECK_CHAIN
+
+ssl_check_chain - check the certificate chain for hosts
+
+=head1 SYNOPSIS
+
+ssl_check_chain [options] [host[:port] ...]
+
+ Options:
+   --CAfile=file     Specify bundle file of trusted CA certificates for verification
+   --CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
+   --starttls=proto  Specify that STARTTLS should be used in the connection.
+   --tlsversion=ver  Specify the version TLS to connect with
+   --type=type       Specify the certificate type desired from the server
+   --help            brief help message
+   --man             full documentation
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<--CAfile>=I<file>
+
+Specify a file containing one or more trusted CA certificates to verify the host's certificate chain.
+
+If not specified, the environment variables SSL_CERT_FILE and CURL_CA_BUNDLE will be tried, and if neither of them is set, OpenSSL's default will be used.
+
+=item B<--CApath>=I<file> B<--CAdir>=I<file>
+
+Specify a directory containing hashed links to one or more trusted CA certificates to verify the host's certificate chain.
+
+If not specified, the environment variable SSL_CERT_DIR will be tried.  If it is not set, OpenSSL's default will be used.
+
+=item B<--starttls>=I<protocol>
+
+Specifies that STARTTLS is required to make the TLS connection.
+
+I<protocol> is one of the following:  "smtp", "pop3", "imap", "ftp", "xmpp",
+           "xmpp-server", "irc", "postgres", "mysql", "lmtp", "nntp", "sieve", or "ldap"
+
+=item B<--tlsversion>=I<version>
+
+Specify the TLS protocol version to use: 1.1, 1.2, or 1.3.
+
+=item B<--type>=I<type>
+
+Specify that an I<ec> or I<rsa> certificate is desired.
+
+=item B<--help>
+
+Print a brief help message and exits.
+
+=item B<--man>
+
+Prints the manual page and exits.
+
+=back
+
+=head1 DESCRIPTION
+
+B<ssl_check_chain> will connect to each host specified and obtain its certificate and any intermediate certificate chain.
+
+If a port is not specified: if --starttls is specified, the default port for the STARTTLS protocol is used, otherwise 444 (https) is assumed.
+The validity dates of each certificate returned will be verified, as will its chain.
+
+For dual-certificate servers, you can specify B<--type>=I<ec> or B<--type>=I<rsa> to request aspecific certificate type.
+This is done by requesting a cipher list; the server may not honor the request.
+
+You can also specify B<--tlsversion>=<1.1>, B<--tlsversion>=<1.2>, or B<--tlsversion>=<1.3> to select the protocol version.
+
+Each certificate is analyzed in the order received from the server, which should be from leaf (the server) toward the root (trusted CA).
+The trust root is not sent by the server, but is located by OpenSSL via -CAfile or -CApath.
+
+Any date or verification errors will be reported.
+
+Note that if a trusted (root) certificate has expired, only the root name is available.
+
+This automates the manual process of determining where and why a certificate chain is broken.
+
+=head1 BUGS
+
+Report any bugs, feature requests and/or patches on the issue tracker,
+located at F<https://github.com/tlhackque/certtools/issues>.  In the
+event that the project moves, contact the author directly.
+
+=head1 AUTHOR
+
+Timothe Litt  E<lt>litt@acm.orgE<gt>
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (c) 2021 Timothe Litt
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the author shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the author.
+
+Any modifications to this software must be clearly documented by and
+attributed to their author, who is responsible for their effects.
+
+Bug reports, suggestions and patches are welcomed by the original author.
+
+=head1 SEE ALSO
+
+I<openssl(1)>
+
+=cut
+
+my @ec_ciphers = ( qw/
+ECDHE-ECDSA-AES128-GCM-SHA256
+ECDHE-ECDSA-AES256-GCM-SHA384
+ECDHE-ECDSA-AES128-SHA256
+ECDHE-ECDSA-AES256-SHA384
+ECDHE-ECDSA-CHACHA20-POLY1305
+ECDHE-RSA-CHACHA20-POLY1305/ );
+
+my @rsa_ciphers = ( qw/
+ECDHE-RSA-AES128-GCM-SHA256
+ECDHE-RSA-AES256-GCM-SHA384
+ECDHE-RSA-AES128-SHA256
+ECDHE-RSA-AES256-SHA384
+ECDHE-RSA-AES128-SHA256
+ECDHE-RSA-AES256-SHA384
+DHE-RSA-AES128-GCM-SHA256
+DHE-RSA-AES256-GCM-SHA384
+DHE-RSA-AES128-SHA
+DHE-RSA-AES256-SHA
+DHE-RSA-AES128-SHA256
+DHE-RSA-AES256-SHA256/ );

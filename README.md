@@ -1,7 +1,9 @@
 # Tools for managing X.509 certificates
 
 This repository contains a number of tools that make managing X.509
-certificates easier.
+certificates easier.  Note that the description in this README may
+not reflect the latest version.  Use the -h option for current
+information.
 
 ## getcert
 Get server's TLS certificate
@@ -61,4 +63,34 @@ V1.0.1
  verification errors, inaccessible host, etc.
 
  Requires: OpenSSL
+````
+
+## ssl_check_chain
+````
+ssl_check_chain [options] [host[:port] ...]
+
+ Options:
+   --CAfile=file     Specify bundle file of trusted CA certificates for verification
+   --CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
+   --starttls=proto  Specify that STARTTLS should be used in the connection.
+   --tlsversion=ver  Specify the version TLS to connect with
+   --type=type       Specify the certificate type desired from the server
+   --help            brief help message
+   --man             full documentation
+
+ssl_check_chain will connect to each host specified and obtain its
+certificate and any intermediate certificate chain.
+
+Each certificate is analyzed in the order received from the server, which
+should be from leaf (the server) toward the root (trusted CA). The trust
+root is not sent by the server, but is located by OpenSSL via -CAfile or
+-CApath.
+
+Any date or verification errors will be reported.
+
+This automates the manual process of determining where and why a
+certificate chain is broken.
+
+
+Requires: Perl, OpenSSL
 ````
