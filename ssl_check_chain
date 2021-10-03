@@ -8,7 +8,7 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.003';
+our $VERSION = 'V1.004';
 
 # License is in the POD at the end of this file.
 
@@ -148,6 +148,13 @@ sub readfile {
 
     $$header = 1;
     $name    = tildename( $name, $at, $atl );
+    unless( defined $name ) {
+        printf STDERR (
+            "Skipping unresolvable filename %s, specified %s\n", $_[0],
+            atloc( $at, $atl ) )
+            if( $warn );
+        return;
+    }
     if( ( my $prev = $hosts{"$name:FILE"} ) ) {
         printf STDERR (
             "Skipping duplicate certificate file %s %s, previously specified in %s\n",
@@ -181,6 +188,9 @@ sub atfile {
     my( $host, $fn, $header, $first, $at, $atl ) = @_;
 
     $fn = tildename( $fn, $at, $atl );
+    die( sprintf( "Unresolvable \@filename %s, specified %s\n", $_[1], atloc( $at, $atl )
+                ) )
+        unless( defined $fn );
     if( $atfiles{$fn} ) {
         printf STDERR (
             "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
