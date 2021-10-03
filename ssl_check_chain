@@ -8,11 +8,12 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.002';
+our $VERSION = 'V1.003';
 
 # License is in the POD at the end of this file.
 
 use Config( qw/%Config/ );
+use Cwd( qw/realpath/ );
 use Date::Parse;
 use File::Basename;
 use File::Spec;
@@ -25,6 +26,8 @@ defined $Config{sig_name} and @signo = ( split( ' ', $Config{sig_name} ) );
 
 my $tmpdir  = File::Spec->tmpdir || '.';
 my $CAcerts = '';
+
+# Environment variables that specify trusted CA locations
 
 my %calocs = ( -CAfile => [qw/SSL_CERT_FILE CURL_CA_BUNDLE/],
                -CApath => [qw/SSL_CERT_DIR/],
@@ -40,36 +43,50 @@ for my $opt ( keys %calocs ) {
 }
 
 # s_client supported list of starttls protocols => standard port
-my %starttls = ( "xmpp-server" => 5269, "postgres" => 5432, "smtp"  => 25, "pop3" => 110,
-                 "imap"        => 143,  "ftp"      => 21,   "xmpp"  => 5222,
-                 "irc"         => 194,  "mysql"    => 3306,
-                 "lmtp"        => 24,   "nntp"     => 119,  "sieve" => 2000, "ldap" => 389
+#<<<
+my %starttls = (
+    "xmpp-server" => 5269, "postgres" => 5432, "xmpp" => 5222, "sieve" => 2000,
+    "mysql"       => 3306, "pop3"     => 110,  "imap" => 143,  "irc"   => 194,
+    "nntp"        => 119,  "ldap"     => 389,  "ftp"  => 21,   "lmtp"  => 24,
+    "smtp"        => 25,
                );
+#>>>
+
+# Duplicate / @loop detection
+my( %atfiles, %hosts );
+
+# Option values => OpenSSL options
 
 my %tlsver = ( '1.1' => '-tls1_1',            '1.2' => '-tls1_2', '1.3' => '-tls1_3', );
 my %cipher = ( ec    => [qw/ALL !RSA ECDSA/], rsa   => [qw/ALL !ECDSA/] );
+$cipher{ecdsa} = $cipher{ec};
 
-my( $cafile, $cadir, $debug, $help, $man, $version, $starttls, $tlsver, $type );
+# Option values
+my( $cafile, $cadir, $debug, $warn, $help, $man, $version, $starttls, $tlsver, $type );
+
+# Execute command & print unexpected errors
 
 sub docmd {
     my( $cmd ) = join( '', @_ );
     printf( ">> %s", $cmd ) if( $debug );
     my $r = qx($cmd);
 
-    if( $? != 0 && $_[1] ne 'verify' ) {
+    if( $? != 0 ) {
         if( $? == -1 ) {
-            printf( "failed to execute %s: $!\n", $cmd );
+            printf STDERR ( "failed to execute %s: $!\n", $cmd );
         } elsif( $? & 127 ) {
-            printf(
+            printf STDERR (
                 "%s died with signal %s (%d), %s coredump\n", $cmd,
                 $signo[ $? & 127 ], ( $? & 127 ), ( $? & 128 ) ? 'with' : 'without' );
-        } else {
-            printf( "%s exited with value %d\n", $cmd, $? >> 8 );
+        } elsif( $_[1] ne 'verify' ) {
+            printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
         return "$r";
     }
     return $r;
 }
+
+# Compute a time difference and return an approximate text representation
 
 sub pdelta {
     my( $date, $now ) = @_;
@@ -97,114 +114,265 @@ sub pdelta {
         strftime( '%a %d-%b-%Y at %T %Z', localtime( $date ) ) );
 }
 
-sub checkhost {
-    my( $host ) = @_;
+# Produce a string describing where something was specified
 
-    my $port;
-    if( $host =~ /^(\[[[:xdigit:]:]\]|.*?):(?:[[:digit:]]+|([[:alnum:].*_-]+))$/ ) {
-        if( $2 ) {
-            $port = getservbyname( $2, 'tcp' );
+sub atloc {
+    my( $at, $atl ) = @_;
+
+    return sprintf( "in %s at line %u", $at, $atl )
+        if( $at );
+    return "in command arguments";
+}
+
+# Expand tildes in file names and return the realpath
+
+sub tildename {
+    my( $filename, $at, $atl ) = @_;
+
+    if( $filename =~ s,^~([^/]*)/,, ) {
+        my $user = length $1 ? $1 : getlogin();
+        my $dir  = ( getpwnam( $user ) )[7];
+        die(sprintf(
+                "~%s/%s: %s has no home directory, specified %s\n", $1, $filename, $user,
+                atloc( $at, $atl ) ) )
+            unless( $dir );
+        $filename = File::Spec->catfile( $dir, $filename );
+    }
+    return realpath( $filename );
+}
+
+# Read a PEM file and make sure it contains at least one certificate
+
+sub readfile {
+    my( $name, $header, $at, $atl ) = @_;
+
+    $$header = 1;
+    $name    = tildename( $name, $at, $atl );
+    if( ( my $prev = $hosts{"$name:FILE"} ) ) {
+        printf STDERR (
+            "Skipping duplicate certificate file %s %s, previously specified in %s\n",
+            $name, atloc( $at, $atl ), $prev )
+            if( $warn );
+        $hosts{"$name:FILE"} = atloc( $at, $atl );
+        return;
+    }
+    $hosts{"$name:FILE"} = atloc( $at, $atl );
+    printf( "open: $name\n" ) if( $debug );
+    if( open( my $fh, '<', $name ) ) {
+        my $chain = '';
+        while( <$fh> ) {
+            $chain .= $_;
+        }
+        close( $fh );
+        unless( $chain =~ /^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE/m ) {
+            die(sprintf(
+                    "No certificates found in %s, specified %s\n", $name,
+                    atloc( $at, $atl ) ) );
+        }
+        ( my $haskey ) = $chain =~ /^-{2,8}BEGIN (RSA|EC) PRIVATE KEY/m;
+        return ( $chain, $haskey );
+    }
+    die( sprintf( "open: %s: %s %s\n", $name, $!, atloc( $at, $atl ) ) );
+}
+
+# Process an indirect file, which contains hosts, files, and/or more indirection
+
+sub atfile {
+    my( $host, $fn, $header, $first, $at, $atl ) = @_;
+
+    $fn = tildename( $fn, $at, $atl );
+    if( $atfiles{$fn} ) {
+        printf STDERR (
+            "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
+            $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
+            if( $warn );
+        $atfiles{$fn} = atloc( $at, $atl );
+        return;
+    }
+    $atfiles{$fn} = atloc( $at, $atl );
+    printf( "open: $fn\n" ) if( $debug );
+    if( open( my $fh, '<', $fn ) ) {
+        while( <$fh> ) {
+            chomp $_;
+            s/^\s*//;
+            s/\s*$//;
+            next if( /^(?:#.*)?$/ );
+            printf( "%s:%u: %s\n", $fn, $., $_ ) if( $debug );
+            $$header = 1;
+            checkhost( $_, $header, $first, $fn, $. );
+        }
+        close( $fh );
+    } else {
+        die( sprintf( "open: %s: %s %s\n", $fn, $!, atloc( $at, $atl ) ) );
+    }
+    return;
+}
+
+# Run the checks on each argument - indirect, host, or file
+
+sub checkhost {
+    my( $host, $header, $first, $at, $atl ) = @_;
+
+    return atfile( $host, $1, $header, $first, $at, $atl ) if( $host =~ /^@(.*)$/ );
+
+    my $text = '';
+    my( $port, $chain, $haskey );
+    if( $host =~ m,^[/.~], || $host =~ m,/, ) {
+        $port = 'FILE';
+        $host =~ s/:FILE$//;
+        ( $chain, $haskey ) = readfile( $host, $header, $at, $atl );
+        return unless( $chain );
+    } elsif( ( my $name, $port, my $pn ) =
+           $host =~ m,^(\[[[:xdigit:]:]\]|.*?):(?:([[:digit:]]+)|([[:alnum:].*_-]+))$, ) {
+        if( $pn ) {
+            $port = getservbyname( $pn, 'tcp' );
             if( $port ) {
-                $host = "$1:$port";
+                $host = "$name:$port";
+            } elsif( $pn =~ /^FILE$/ ) {
+                $port = $pn;
+                ( $chain, $haskey ) = readfile( $name, $header, $at, $atl );
+                return unless( $chain );
             } else {
-                die( "$2 is not a known port name, see /etc/services\n" );
+                die(sprintf(
+"%s is not a known port name for %s, specified %s, see /etc/services\n",
+                        $pn, $name, atloc( $at, $atl ) ) );
             }
         }
     } elsif( $starttls =~ /^-starttls (.*)$/ && ( $port = $starttls{$1} ) ) {
         $host .= ":$port";
     } else {
-        $host .= ":443";
+        $port = 443;
+        $host .= ":$port";
     }
-    my $chain = docmd(
-        "openssl ", "s_client",
-        " $CAcerts $starttls -showcerts $tlsver $type -connect $host </dev/null 2>&1\n" );
-    return unless( $chain );
+    if( $port ne 'FILE' ) {
+        if( ( my $prev = $hosts{$host} ) ) {
+            printf STDERR (
+                "Skipping duplicate host %s %s, previously specified %s\n", $host,
+                atloc( $at, $atl ), $prev )
+                if( $warn );
+            $hosts{$host} = atloc( $at, $atl );
+            return;
+        }
+        $hosts{$host} = atloc( $at, $atl );
+    }
 
-    my @chain = $chain =~ /(^-{2,8}BEGIN.*?^-{2,8}END.*?\n)/msg;
-    return $chain unless( @chain );
+    unless( defined $chain ) {
+        $chain = docmd(
+            "openssl ", "s_client",
+" $CAcerts $starttls -showcerts $tlsver $type -connect $host </dev/null 2>&1\n" );
+        return unless( $chain );
+    }
 
-    my $text = '';
-    my %cert;
-    my $now = time;
+    my @chain = $chain =~ /(^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE.*?^-{2,8}END.*?\n)/msg;
+    if( @chain ) {
+        my %cert;
+        my $now = time;
 
-    my $untrusted = '';
-    for( my $i = 0; $i < @chain; ++$i ) {
-        my $file = File::Temp->new( DIR    => $tmpdir, TEMPLATE => "checkchain-$i-XXXXXX",
+        my $untrusted = '';
+        for( my $i = 0; $i < @chain; ++$i ) {
+            my $file = File::Temp->new(
+                                    DIR    => $tmpdir, TEMPLATE => "checkchain-$i-XXXXXX",
                                     SUFFIX => '.pem',  UNLINK   => 1 );
-        $cert{$i}{file} = $file;
-        print $file ( $chain[$i] );
-        $file->flush;
-        my $state = docmd( "openssl ",           "x509",
-                           " -noout -text -in ", "$file\n" );
-        $cert{$i}{subject} = $1 if( $state =~ /^\s*Subject:\s*(.*?)$/m );
-        $cert{$i}{issuer}  = $1 if( $state =~ /^\s*Issuer:\s*(.*?)$/m );
-        $cert{$i}{start} = str2time( $1, 'GMT' )
-            if( $state =~ /^\s*Not Before\s*:\s*(.*?)$/m );
-        $cert{$i}{end} = str2time( $1, 'GMT' )
-            if( $state =~ /^\s*Not After\s*:\s*(.*?)$/m );
-        $cert{$i}{key} = uc $1
-            if( $state =~
-              /^\s*Public Key Algorithm\s*:\s*(?:id-)?(.*?)(?:PublicKey|Encryption)?$/m );
-        $cert{$i}{klen} = $1 if( $state =~ /^\s*(?:RSA )?Public-Key\s*:\s*(.*?)$/m );
+            $cert{$i}{file} = $file;
+            print $file ( $chain[$i] );
+            $file->flush;
+            my $state = docmd( "openssl ",           "x509",
+                               " -noout -text -in ", "$file\n" );
+            $cert{$i}{subject} = $1 if( $state =~ /^\s*Subject:\s*(.*?)$/m );
+            $cert{$i}{issuer}  = $1 if( $state =~ /^\s*Issuer:\s*(.*?)$/m );
+            $cert{$i}{start} = str2time( $1, 'GMT' )
+                if( $state =~ /^\s*Not Before\s*:\s*(.*?)$/m );
+            $cert{$i}{end} = str2time( $1, 'GMT' )
+                if( $state =~ /^\s*Not After\s*:\s*(.*?)$/m );
+            $cert{$i}{key} = uc $1
+                if( $state =~
+                 /^\s*Public Key Algorithm\s*:\s*(?:id-)?(.*?)(?:PublicKey|Encryption)?$/m
+                );
+            $cert{$i}{klen} = $1 if( $state =~ /^\s*(?:RSA )?Public-Key\s*:\s*(.*?)$/m );
 
-        $untrusted .= sprintf( " -untrusted %s", "$file" ) if( $i > 0 );
-    }
-
-    for( my $i = 0; $i < @chain; ++$i ) {
-        $text .= "\n" if( $i > 0 );
-        $text .= sprintf( "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
-                          $cert{$i}{issuer} );
-        $text .= sprintf( "    Type   : %s %s\n", $cert{$i}{key}, $cert{$i}{klen} );
-        if( $now < $cert{$i}{start} || $now > $cert{$i}{end} ) {
-            $text .= "    Certificate is NOT valid at this time\n";
+            $untrusted .= sprintf( " -untrusted %s", "$file" ) if( $i > 0 );
         }
-        if( $now < $cert{$i}{start} ) {
+
+        for( my $i = 0; $i < @chain; ++$i ) {
+            $text .= "\n" if( $i > 0 );
+            $text .= sprintf( "Contains private %s key\n\n", $haskey )
+                if( $i == 0 && $haskey );
             $text .= sprintf(
-                "    Certificate is not yet valid, will be %s\n",
-                pdelta( $cert{$i}{start}, $now ) );
-        } else {
-            $text .= sprintf(
-                "    Certificate became valid %s\n",
-                pdelta( $cert{$i}{start}, $now ) );
-        }
-        if( $now > $cert{$i}{end} ) {
-            $text .=
-                sprintf( "    Certificate expired %s\n", pdelta( $cert{$i}{end}, $now ) );
-        } else {
-            $text .=
-                sprintf( "    Certificate expires %s\n", pdelta( $cert{$i}{end}, $now ) );
-        }
-
-        my $state = docmd( "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
-                           " 2>&1\n" );
-        chomp $state;
-
-        if( my( $subj, $err, $depth, $text ) = $state =~
-            /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m ) {
-            if( $subj eq $cert{$i}{issuer} ) {
-                $state =
-"Failed to verify issuer certificate:\n  $subj\n  SSL error: $err : \"$text\" at depth $depth";
+                            "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
+                            $cert{$i}{issuer} );
+            $text .= sprintf( "    Type   : %s %s\n", $cert{$i}{key}, $cert{$i}{klen} );
+            if( $now < $cert{$i}{start} || $now > $cert{$i}{end} ) {
+                $text .= "    Certificate is NOT valid at this time\n";
             }
+            if( $now < $cert{$i}{start} ) {
+                $text .= sprintf(
+                    "    Certificate is not yet valid, will be %s\n",
+                    pdelta( $cert{$i}{start}, $now ) );
+            } else {
+                $text .= sprintf(
+                    "    Certificate became valid %s\n",
+                    pdelta( $cert{$i}{start}, $now ) );
+            }
+            if( $now > $cert{$i}{end} ) {
+                $text .= sprintf(
+                    "    Certificate expired %s\n",
+                    pdelta( $cert{$i}{end}, $now ) );
+            } else {
+                $text .= sprintf(
+                    "    Certificate expires %s\n",
+                    pdelta( $cert{$i}{end}, $now ) );
+            }
+
+            my $state = docmd(
+                           "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
+                           " 2>&1\n" );
+            chomp $state;
+
+            if( my( $subj, $err, $depth, $text ) =
+                $state =~
+                /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m )
+            {
+                if( $subj eq $cert{$i}{issuer} ) {
+                    $state =
+"Failed to verify issuer's certificate:\n  $subj\n  SSL error: $err : \"$text\" at depth $depth";
+                }
+            }
+            $state =~ s,$tmpdir/.*?\.pem: ,,g;
+            $state = "Verify result: " . $state;
+            $state =~ s/^/    /gm;
+            $text .= $state . "\n";
         }
-        $state =~ s,$tmpdir/.*?\.pem: ,,g;
-        $state = "Verify result: " . $state;
-        $state =~ s/^/    /gm;
-        $text .= $state . "\n";
+    } else {
+        $text = $chain;
     }
-    return $text;
+    if( $$header ) {
+        $text =~ s/^/  /mg;
+
+        $header = '';
+        if( $$first ) {
+            $$first = 0;
+        } else {
+            $header = "\n";
+        }
+        $header .= sprintf( "%s\n%s\n", $host, '-' x length( $host ) );
+        $text = $header . $text;
+    }
+
+    print( $text );
 }
 
-GetOptions(
-    "CAfile=s"       => \$cafile,
-    "CApath|CAdir=s" => \$cadir,
-    "debug|d"        => \$debug,
-    "starttls=s"     => \$starttls,
-    "tlsversion=s"   => \$tlsver,
-    "type=s"         => \$type,
-    'help|?|h'       => \$help,
-    man              => \$man,
-    version          => \$version,
+# Main program - Process command line options
 
+GetOptions( "CAfile=s"       => \$cafile,
+            "CApath|CAdir=s" => \$cadir,
+            "debug|d!"       => \$debug,
+            "starttls=s"     => \$starttls,
+            "tlsversion=s"   => \$tlsver,
+            "type=s"         => \$type,
+            "warnings!"      => \$warn,
+            'help|?|h'       => \$help,
+            'man'            => \$man,
+            'version'        => \$version,
           ) or die( "Command line error, --help for usage\n" );
 if( $help || $man ) {
     eval {
@@ -221,6 +389,9 @@ if( $version ) {
     print( basename( $0 ) . " version $VERSION\n$copyright" );
     exit;
 }
+$warn = 1 unless( defined $warn );
+
+# Default and/or convert option values for use
 
 if( defined $cafile || defined $cadir ) {
     $CAcerts = '';
@@ -244,31 +415,30 @@ if( defined $type ) {
     $type = lc $type;
     my $list = $cipher{$type};
     die "Unspported cipher type $type\n" unless( $list );
-    if( $tlsver !~ /_1_3$/ ) {
+    if( $tlsver !~ /1_3$/ ) {
         $tlsver = '-tls1_2' unless( $tlsver );
-        $type   = "-cipher " . join( ':', @$list );
-    } elsif( $type ne 'ec' ) {
+    } elsif( $list != $cipher{ecdsa} ) {
         die "TLS 1.3 doesn't support $type\n";
     }
+    $type = "-cipher " . join( ':', @$list );
 } else {
     $type = '';
 }
 
-if( @ARGV > 1 ) {
-    my $i = 0;
-    foreach my $host ( @ARGV ) {
-        print( "\n" ) if( $i++ );
-        printf( "%s\n%s\n", $host, '-' x length( $host ) );
-        my $txt = checkhost( $host );
-        $txt =~ s/^/  /mg;
-        print( $txt );
-    }
-} elsif( @ARGV ) {
-    print( checkhost( $ARGV[0] ) );
-} else {
+# Finally, process each command line argument (or complain if none)
+
+unless( @ARGV >= 1 ) {
     eval { require Pod::Usage; } or die( "See " . basename( $0 ) . " --help\n" );
     Pod::Usage::pod2usage( 1 );
 }
+
+my $first  = 1;
+my $header = @ARGV > 1 || grep { /^@/ } @ARGV;
+
+foreach my $host ( @ARGV ) {
+    checkhost( $host, \$header, \$first );
+}
+exit
 
 __END__
 
@@ -278,7 +448,7 @@ ssl_check_chain - check the certificate chain for hosts
 
 =head1 SYNOPSIS
 
-ssl_check_chain [options] [host[:port] ...]
+ssl_check_chain [options] [host[:port] ...] [file:FILE] [@file...]
 
  Options:
    --CAfile=file     Specify bundle file of trusted CA certificates for verification
@@ -286,6 +456,7 @@ ssl_check_chain [options] [host[:port] ...]
    --starttls=proto  Specify that STARTTLS should be used in the connection.
    --tlsversion=ver  Specify the version TLS to connect with
    --type=type       Specify the certificate type desired from the server
+   --[no-]warnings   Display or suppress warnings
    --help            brief help message
    --man             full documentation
 
@@ -318,7 +489,13 @@ Specify the TLS protocol version to use: 1.1, 1.2, or 1.3.
 
 =item B<--type>=I<type>
 
-Specify that an I<ec> or I<rsa> certificate is desired.
+Specify that an I<ecdsa> or I<rsa> certificate is desired.
+
+=item B<--[no-]warnings>
+
+Controls whether warning messages are displayed.  The default is B<--warnings>.
+
+Warnings include duplicated files and hosts, which are skipped, and other recoverable conditions.
 
 =item B<--help>
 
@@ -337,14 +514,24 @@ B<ssl_check_chain> will connect to each host specified and obtain its certificat
 Port can be numeric, or a service name (e.g. from /etc/services).
 
 If a port is not specified: if --starttls is specified, the default port for the STARTTLS protocol is used, otherwise 444 (https) is assumed.
+
+If the port is specified as I<FILE>, B<ssl_check_chain> will open the specified file and process it as if the certificates were received from a server.
+The certificate chain must be in PEM format.  If a filename begins with '.', '/', or '~', or if it contains a '/', the I<:FILE> is inferred, since
+no DNS hostname or IP address can have those forms.  
+
+If an argument is of the form I<@file>, the file is processed as a list of arguments, one per line, in any of the forms described previously.
+I<@file>s can be nested, but attempting to process the same file more than once is an error.  In an I<@file>, blank lines and lines beginning with I<#> are ignored.
+
+I<FILE> and I<@file> names support tilde expansion, but not wildcards.
+
 The validity dates of each certificate returned will be verified, as will its chain.
 
-For dual-certificate servers, you can specify B<--type>=I<ec> or B<--type>=I<rsa> to request aspecific certificate type.
+To request the desired certificate from  dual-certificate servers, you can specify B<--type>=I<ec> or B<--type>=I<rsa>.
 This is done by requesting a cipher list; the server may not honor the request.
 
 You can also specify B<--tlsversion>=<1.1>, B<--tlsversion>=<1.2>, or B<--tlsversion>=<1.3> to select the protocol version.
 
-Each certificate is analyzed in the order received from the server, which should be from leaf (the server) toward the root (trusted CA).
+Each certificate is analyzed in the order received from the server or contained in the file, which should be from leaf (the server) toward the root (trusted CA).
 The trust root is not sent by the server, but is located by OpenSSL via -CAfile or -CApath.
 
 Any date or verification errors will be reported.

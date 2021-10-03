@@ -67,7 +67,7 @@ V1.0.1
 
 ## ssl_check_chain
 ````
-ssl_check_chain [options] [host[:port] ...]
+ssl_check_chain [options] [host[:port] ...] [file:FILE] [@file]
 
  Options:
    --CAfile=file     Specify bundle file of trusted CA certificates for verification
@@ -80,6 +80,16 @@ ssl_check_chain [options] [host[:port] ...]
 
 ssl_check_chain will connect to each host specified and obtain its
 certificate and any intermediate certificate chain.
+
+Port can be numeric, or a service name (e.g. from /etc/services).
+
+If the port is specified as FILE or the argument looks like a
+filename, ssl_check_chain will open the specified file and process
+it as if the certificates were received from a server.  The certificate
+chain must be in PEM format.
+
+If an argument is of the form @file, the file is processed as a list of
+arguments, one per line, in any of the forms described previously.
 
 Each certificate is analyzed in the order received from the server, which
 should be from leaf (the server) toward the root (trusted CA). The trust
