@@ -79,7 +79,7 @@ sub docmd {
         } elsif( $? & 127 ) {
             printf STDERR (
                 "%s died with signal %s (%d), %s coredump\n", $cmd,
-                $signo[ $? & 127 ], ( $? & 127 ), ( $? & 128 ) ? 'with' : 'without' );
+                ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ), ( $? & 128 ) ? 'with' : 'without' );
         } elsif( $_[1] ne 'verify' ) {
             printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
@@ -259,7 +259,7 @@ sub checkhost {
     if( $port ne 'FILE' ) {
         if( ( my $prev = $hosts{$host} ) ) {
             printf STDERR (
-                "Skipping duplicate host %s %s, previously specified %s\n", $host,
+                "Skipping duplicate host \"%s\" %s, previously specified %s\n", $host,
                 atloc( $at, $atl ), $prev )
                 if( $warn );
             $hosts{$host} = atloc( $at, $atl );
