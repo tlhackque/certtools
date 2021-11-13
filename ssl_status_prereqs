@@ -1,0 +1,82 @@
+#!/usr/bin/perl
+
+use warnings;
+use strict;
+
+# Verify the the modules used by ssl_status are installed
+# Most are core modules, so this should be painless.
+
+my $copyright = << 'COPYRIGHT';
+Copyright (C) 2021 Timothe Litt <litt at acm.org>
+Use --man for license information.
+COPYRIGHT
+
+our $VERSION = 'V1.000';
+
+my %mods = ( qw+
+             Config            unknown
+             Cwd               3.60
+             Date::Parse       2.30
+             Fcntl             1.05
+             File::Basename    2.74
+             File::Spec        3.60
+             File::Temp        0.2304
+             Getopt::Long      2.48
+             IO::Socket::IP    0.41
+             IO::Socket::SSL   2.072
+             MIME::Base64      3.13
+             MIME::QuotedPrint 3.13
+             Net::SMTP         3.13
+             Net::SSLeay       1.90
+             POSIX             1.09
+             Perl::OSType      1.002
+             Sys::Hostname     1.11
+             Text::Abbrev      1.02
+             Text::ParseWords  3.27
+             + );
+
+print STDERR ( "Checking prerequisites\n" );
+
+my $w = 0;
+foreach( keys %mods ) {
+    $w = length if length > $w;
+}
+my @missing;
+foreach( sort keys %mods ) {
+    my $ver = $mods{$_};
+    eval "require $_" or do {
+            push @missing, $_;
+            printf STDERR ( "Missing module %s\n", $_ );
+            next;
+    };
+    if( $ver ne 'unknown' ) {
+        eval "$_->VERSION( $ver )";
+        if( $@ ) {
+            $@ =~ s/^$_ /    /;
+            $@ =~ s/ at .*\Z//s;
+            $@ =~ s/this is only version/found version/;
+            printf STDERR ( "%s found, but below version %s\n%s\n", $_, $ver, $@ );
+            push @missing, $_;
+            next;
+        }
+    }
+    printf STDERR ( "Found %-*s version %s\n", $w, $_, $_->VERSION || '(unknown)' );
+
+    #./prereqs 2>/dev/null to update list of current versions.
+    #printf ( "%-*s %s\n", $w, $_, $_-> VERSION || 'unknown' );
+}
+
+if( @missing ) {
+    printf STDERR (
+                    <<'XXX', @missing == 1 ? ( 'module is', 'it', 'its' ) : ( 'modules are', 'them', 'their' ) );
+If the missing %s not available in your distribution (preferred),
+you can install %s (and %s prerequisites) from CPAN with the following command:
+
+XXX
+    print STDERR "cpan install ", join( " ", @missing ), "\n";
+    exit 1;
+} else {
+    print STDERR "All prerequisites found\n";
+}
+
+exit;

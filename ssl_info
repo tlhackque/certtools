@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Copyright (C) 2017, 2020 Timothe Litt <litt@acm.org>
+# Copyright (C) 2017, 2020, 2021 Timothe Litt <litt@acm.org>
 
-VERSION=1.0.1
+VERSION=1.1.0
 
-SELF="`basename $0`"
-HOSTS="`dirname $0`/ssl_certs"
+SELF="$(basename "$0")"
+HOSTS="$(dirname "$0")/ssl_certs"
 
 function info() {
     # Extract intresting lines; filter excess & reformat
@@ -13,9 +13,15 @@ function info() {
     local line=
     local nl=$'\n'
     local endcert="^--+END"
-    while IFS='' read line; do
+    local found=
+    while IFS='' read -r line; do
+        if [ "$line" = "no peer certificate available" ]; then
+            echo "$line" >&2
+            return 1
+        fi
         cert="$cert$line$nl"
         if [[ $line =~ $endcert ]]; then
+            found=1
             <<<"$cert" openssl x509 -noout -text | \
                 grep -PA1 'Issuer:|Not Before:|Not After :|Subject:| X509v3 Subject Alternative Name:| Subject Public Key Info:' |\
                 grep -vP 'Subject Public Key Info:|^--|^\s*Validity$' | \
@@ -32,22 +38,66 @@ s/, DNS:/,\n            DNS:/g'
     done
     <<<"$cert" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
         sed -e's/^  *//g;s/^/    /g' | sort
+    if [ -n "$found" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+function hostcerts() {
+    local HOST="$1" PORT="$2"
+
+    [ -z "$PORT" ] && PORT=443
+    echo "$HOST:$PORT"
+
+    cmd=("openssl" "s_client" "-connect" "$HOST:$PORT" "-servername" "$HOST" "-showcerts" "-CAfile" "$CA")
+    [ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")
+    [ "${#CTYPE}" -gt 0 ]    && cmd+=("${CTYPE[@]}")
+    [ -n "$PROTO" ]          && cmd+=("$PROTO")
+    if [ -n "$DEBUG" ]; then
+        echo "${cmd[@]}" >>"$DEBUG"
+        "${cmd[@]}" </dev/null 2>"$ERRS" | tee -a "$DEBUG"  | info
+    else
+        "${cmd[@]}" </dev/null 2>"$ERRS"  | info
+    fi
+    # shellcheck disable=SC2181
+    if [ "$?" != 0 ]; then
+        if grep -q 'alert handshake failure' "$ERRS"; then
+            echo "Unable to establish TLS connection to $HOST:$PORT with specified parameters" >&2
+        else
+            local -A seen
+            while IFS='' read -r line; do
+                if [[ "$line" =~ ^[0-9]+:([^:]+):[^:]+:[^:]+:([^:]+):([^:]+): ]]; then
+                    str="OpenSSL:${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
+                    if [ -z "${seen["$str"]}" ]; then
+                        echo "$str" >&2
+                        seen["$str"]="1"
+                    fi
+                else
+                    echo "$line" >&2
+                fi
+            done <"$ERRS"
+        fi
+    fi
+    true >"$ERRS"
 }
 
 function usage() {
     cat <<EOF
-Usage: $SELF [-C bundle] [-c cipher] [-s proto] [-t tlsver] [host [port]]
+Usage: $SELF [-C bundle] [-c type] [-s proto] [-t tlsver] [host [port]]
 
 Display basic certificate information from a server or file
 V$VERSION
 
- If no host is specified, $HOSTS is read.  This contains lines HOST [PORT].
- PORT defaults to 443.
+ If no host is specified, $HOSTS is read.  This contains lines HOST [PORT]
+ or HOST[:PORT].   PORT defaults to 443.
  If port is FILE, "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification
-  c: cipher     Cipher list (man ciphers/openssl ciphers)
+  c: type       Type of certificate to request (dual certificate hosts)
+  d: file       Debug information to file
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 
@@ -57,36 +107,40 @@ V$VERSION
  A summary of the key attributes of each certificate is displayed.
 
  When working with dual-certificate servers, use -c RSA and -c ECDHA to
- select the desired certificate.  An arbitrary list can be specified.
-
- Most errors are silently ignored; I'm too lazy to sort out
- verification errors, inaccessible host, etc.
+ select the desired certificate.
 
  Requires: OpenSSL
+
+See LICENSE for license.
 EOF
     exit
 }
 
 # Process options
 
-CIPHER=
+CTYPE=
 STARTTLS=
 PROTO=
 CA="/etc/pki/tls/certs/ca_bundle.pem"
+DEBUG=
 
-while getopts "C:c:hs:t:" opt; do
+while getopts "C:c:d:hs:t:" opt; do
     case "$opt" in
         C)
             CA="$OPTARG"
             ;;
         c)
-            CIPHER="-cipher $OPTARG"
+            CTYPE="$OPTARG"
+            ;;
+        d)
+            DEBUG="$OPTARG"
+            true >"$DEBUG"
             ;;
         h)
             usage
             ;;
         s)
-            STARTTLS="-starttls $OPTARG"
+            STARTTLS=("-starttls" "$OPTARG")
             ;;
         t)
             case "$OPTARG" in
@@ -108,22 +162,49 @@ while getopts "C:c:hs:t:" opt; do
 done
 shift $((OPTIND-1))
 
+function exit_trap() {
+    err="$?"
+    if [[ -n "$ERRS" ]]; then
+        cat "$ERRS" >&2
+        rm -f "$ERRS"
+    fi
+    exit $err
+}
+ERRS="$(mktemp 2>/dev/null || mktemp -t ssl_info.XXXXXX)" || exit 3
+trap "exit_trap" EXIT
+
+if [ -n "$CTYPE" ]; then
+    if [[ $CTYPE =~ ^(EC|ECDSA|ec|ecdsa)$ ]]; then
+        CTYPE="ECDSA+SHA1:ECDSA+SHA224:ECDSA+SHA384:ECDSA+SHA256:ECDSA+SHA512"
+    elif [[ $CTYPE =~ ^(RSA|rsa)$ ]]; then
+         if openssl list -public-key-algorithms | grep -q "RSA-PSS" ; then
+             CTYPE="RSA-PSS+SHA512:RSA-PSS+SHA384:RSA-PSS+SHA256:RSA+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA224:RSA+SHA1"
+         else
+             CTYPE="RSA+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA224:RSA+SHA1"
+         fi
+    else
+        echo "Unknown certificate type $CTYPE" >&2
+        exit 1;
+    fi
+    CTYPE=(-sigalgs "$CTYPE")
+fi
 if [ -z "$1" ]; then
     # Process hosts file
-    egrep -v '(^#|^$)' "$HOSTS" |  while read HOST PORT
+    grep -E -v '(^#|^$)' "$HOSTS" |  while read -r HOST PORT
     do
+      if [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
+          HOST="${BASH_REMATCH[1]}"
+          PORT="${BASH_REMATCH[2]}"
+      fi
       if [ "$PORT" = "FILE" ]; then
           echo "$HOST"
           if ! [ -r "$HOST" ]; then
               echo "    Can't read file $HOST" >&2
               continue
           fi
-          cat "$HOST" | info
+          info <"$HOST"
       else
-          [ -z "$PORT" ] && PORT=443
-          echo "$HOST:$PORT"
-          openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts -CAfile "$CA" $STARTTLS $CIPHER $PROTO \
-              </dev/null 2>/dev/null | info
+          hostcerts "$HOST" "$PORT"
       fi
       echo ""
     done
@@ -135,18 +216,18 @@ fi
 
 HOST="$1"
 PORT="$2"
-[ -z "$PORT" ] && PORT=443
-
+if [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
+    HOST="${BASH_REMATCH[1]}"
+    PORT="${BASH_REMATCH[2]}"
+fi
 if [ "$PORT" = "FILE" ]; then
     echo "$HOST"
     if ! [ -r "$HOST" ]; then
         echo "Can't read file $HOST" >&2
         exit 1
     fi
-    cat "$HOST" | info
+    info <"$HOST" 
 else
-    echo "$HOST:$PORT"
-    openssl s_client -connect "$HOST:$PORT" -servername "$HOST" -showcerts -CAfile "$CA" $STARTTLS $CIPHER $PROTO \
-        </dev/null 2>/dev/null | info
+    hostcerts "$HOST" "$PORT"
 fi
 echo ""

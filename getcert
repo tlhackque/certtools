@@ -4,31 +4,34 @@
 #
 # Get SSL/TLS certificate from a server
 
-VERSION="1.0.1"
+VERSION="1.1.0"
 
-SELF="`basename $0`"
+SELF="$(basename "$0")"
 
-PORT=443
-DUMP=cat
+PORT=
+CA="/etc/pki/tls/certs/ca_bundle.pem"
+DUMP="cat"
 ALL=
-CIPHER=
+CTYPE=
 STARTTLS=
 OUTPUT=
 PROTO=
+FOUNDCERT=
 
 function usage() {
     cat <<EOF
-Usage: $SELF [-acdophs] server
+Usage: $SELF [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
  V$VERSION
 
  Options:
   a             Report all certificates (including intermediates)
-  c: cipher     Cipher list (man ciphers/openssl ciphers)
+  C: bundle     CA bundle file for verification
+  c: type       Type of certificate to request (dual certificate hosts)
   d             Decode certificate (as well as PEM)
   o FILE        Output to FILE
-  p: port       Port number for connection
+  p: port       Port number for connection (or use server:port)
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 
@@ -37,7 +40,7 @@ Usage: $SELF [-acdophs] server
  written to stdout (or FILE), optionally with text decoding.
 
  When working with dual-certificate servers, use -c RSA and -c ECDSA to
- select the desired certificate.  An arbitrary list can be specified.
+ select the desired certificate.
 
  Requires: OpenSSL
 
@@ -46,13 +49,16 @@ EOF
     exit 1;
 }
 
-while getopts "ac:dho:p:s:t:" opt; do
+while getopts "aC:c:dho:p:s:t:" opt; do
     case "$opt" in
         a)
             ALL="-showcerts"
             ;;
+        C)
+            CA="$OPTARG"
+            ;;
         c)
-            CIPHER="-cipher $OPTARG"
+            CTYPE="$OPTARG"
             ;;
         d)
             DUMP="openssl x509 -text"
@@ -64,7 +70,7 @@ while getopts "ac:dho:p:s:t:" opt; do
             PORT="$OPTARG"
             ;;
         s)
-            STARTTLS="-starttls $OPTARG"
+            STARTTLS=("-starttls" "$OPTARG")
             ;;
         t)
             case "$OPTARG" in
@@ -89,26 +95,101 @@ while getopts "ac:dho:p:s:t:" opt; do
 done
 shift $((OPTIND-1))
 
-if [ -n "$ALL" ] && [ "$DUMP" != "cat" ]; then
-    # OpenSSL restriction - x509 only processes one certificate
-    # and it's too much trouble to split a chain for decoding.
-    echo "-a can not be used with -d" >&2
-    exit 1;
+if [ -n "$CTYPE" ]; then
+    if [[ $CTYPE =~ ^(EC|ECDSA|ec|ecdsa)$ ]]; then
+        CTYPE="ECDSA+SHA1:ECDSA+SHA224:ECDSA+SHA384:ECDSA+SHA256:ECDSA+SHA512"
+    elif [[ $CTYPE =~ ^(RSA|rsa)$ ]]; then
+         if openssl list -public-key-algorithms | grep -q "RSA-PSS" ; then
+             CTYPE="RSA-PSS+SHA512:RSA-PSS+SHA384:RSA-PSS+SHA256:RSA+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA224:RSA+SHA1"
+         else
+             CTYPE="RSA+SHA512:RSA+SHA256:RSA+SHA384:RSA+SHA224:RSA+SHA1"
+         fi
+    else
+        echo "Unknown certificate type $CTYPE" >&2
+        exit 1;
+    fi
+    CTYPE=(-sigalgs "$CTYPE")
 fi
 
 SERVER="$1"
 [ -n "$SERVER" ] || usage
 shift
 
+if [[ -z "$PORT" &&  "$SERVER" =~ ^([^:]+):([^:]+)$ ]]; then
+    SERVER="${BASH_REMATCH[1]}"
+    PORT="${BASH_REMATCH[2]}"
+fi
+[ -z "$PORT" ] && PORT="443"
+
 [ -n "$OUTPUT" ] && exec >"$OUTPUT"
 
-openssl s_client -connect "$SERVER:$PORT" -servername "$SERVER" $CIPHER \
-    $ALL $STARTTLS $PROTO </dev/null 2>/dev/null |                             \
-    sed -ne'/^-----BEGIN/,/^-----END/p' | $DUMP
-# Currently, s_client doesn't exit non-zero if connection fails.
-# But it might someday.
-if [ ${PIPESTATUS[0]} != 0 ]; then
-    exit ${PIPESTATUS[0]}
+function exit_trap() {
+    err="$?"
+    if [[ -n "$ERRS" ]]; then
+        if [ -z "$FOUNDCERT" ]; then
+            if grep -q 'alert handshake failure' "$ERRS"; then
+                echo "Unable to establish TLS connection to $SERVER:$PORT with specified parameters" >&22
+            else
+                local -A seen
+                while IFS='' read -r line; do
+                    if [[ "$line" =~ ^[0-9]+:([^:]+):[^:]+:[^:]+:([^:]+):([^:]+): ]]; then
+                        str="OpenSSL:${BASH_REMATCH[1]}:${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
+                        if [ -z "${seen["$str"]}" ]; then
+                            echo "$str" >&22
+                           seen["$str"]="1"
+                        fi
+                    else
+                        echo "$line" >&22
+                    fi
+                done <"$ERRS"
+            fi
+        fi
+        rm -f "$ERRS"
+    fi
+    exit $err
+}
+ERRS="$(mktemp 2>/dev/null || mktemp -t ssl_info.XXXXXX)" || exit 3
+trap "exit_trap" EXIT
+exec 22>&2-
+exec 2>"$ERRS"
+
+cmd=("openssl" "s_client" "-connect" "$SERVER:$PORT" "-servername" "$SERVER" "-CAfile" "$CA")
+[ -n "$ALL" ]            && cmd+=("$ALL")
+[ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")
+[ "${#CTYPE}" -gt 0 ]    && cmd+=("${CTYPE[@]}")
+[ -n "$PROTO" ]          && cmd+=("$PROTO")
+
+nl=$'\n'
+begmark="^--+BEGIN"
+endmark="^--+END"
+cert=""
+incert=
+
+while IFS='' read -r line ; do
+    if [ "$line" = "no peer certificate available" ]; then
+        exit 1
+    fi
+    if [ -n "$incert" ]; then
+        if [[ $line =~ $endmark ]]; then
+            FOUNDCERT="1"
+            <<<"$cert$line" $DUMP
+            cert=""
+            incert=""
+        else
+            cert+="$line$nl"
+        fi
+    else
+        if [[ $line =~ $begmark ]]; then
+            incert="1"
+            cert="$line$nl"
+        fi
+    fi
+done < <("${cmd[@]}" </dev/null )
+
+if [ -n "$FOUNDCERT" ]; then
+    exit 0
+else
+    echo "No certificates were provided by the server" >&2
+    exit 1
 fi
 
-exit ${PIPESTATUS[2]}
