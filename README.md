@@ -20,7 +20,7 @@ Get server's TLS certificate
 Usage: getcert [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
- Version cd97-8340-c673-0286
+ Version 36ab-8160-ed52-2987
 
  Options:
   a             Report all certificates (including intermediates)
@@ -46,19 +46,21 @@ See LICENSE for license.
 
 ## ssl_info
 ````
-Usage: ssl_info [-C bundle] [-c type] [-s proto] [-t tlsver] [host [port]]
+Usage: ssl_info [-C bundle] [-c type] [-s proto] [-t tlsver] [host[: port]]
 
 Display basic certificate information from a server or file
-Version cd97-8340-c673-0286
+Version c549-20c6-9824-dbf2
 
- If no host is specified, ./ssl_certs is read.  This contains lines HOST [PORT]
- or HOST[:PORT].   PORT defaults to 443.
+ If no host is specified, a file containing a list of hosts to query may
+ my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
+ PORT defaults to 443.
  If port is FILE, "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
   d: file       Debug information to file
+  f: file       File listing hosts to query
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 

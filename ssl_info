@@ -6,38 +6,52 @@
 VERSION='$Id$'
 
 SELF="$(basename "$0")"
-HOSTS="$(dirname "$0")/ssl_certs"
 
 function info() {
     # Extract intresting lines; filter excess & reformat
     local cert=
+    local incert=
     local line=
+    local text=
     local nl=$'\n'
+    local begcert="^--+BEGIN( TRUSTED)? CERTIFICATE"
     local endcert="^--+END"
+    local begother="--+BEGIN ([^-]*)--+$"
     local found=
     while IFS='' read -r line; do
         if [ "$line" = "no peer certificate available" ]; then
             echo "$line" >&2
             return 1
         fi
-        cert="$cert$line$nl"
-        if [[ $line =~ $endcert ]]; then
-            found=1
-            <<<"$cert" openssl x509 -noout -text | \
-                grep -PA1 'Issuer:|Not Before:|Not After :|Subject:| X509v3 Subject Alternative Name:| Subject Public Key Info:' |\
-                grep -vP 'Subject Public Key Info:|^--|^\s*Validity$' | \
-                sed -e's/, \([A-Z][A-Z.0-9]*=\)/\n            \1/g;
+        if [ -n "$incert" ]; then
+            if [[ $line =~ $endcert ]]; then
+                found=1
+                <<<"$cert$line" openssl x509 -noout -text | \
+                    grep -PA1 'Issuer:|Not Before:|Not After :|Subject:| X509v3 Subject Alternative Name:| Subject Public Key Info:' |\
+                    grep -vP 'Subject Public Key Info:|^--|^\s*Validity$' | \
+                    sed -e's/, \([A-Z][A-Z.0-9]*=\)/\n            \1/g;
 s/    Not After :/Expires:/;
 s/    Not Before:/Issued :/;
 s/    X509v3 Subject Alternative Name:/Subject Alternative Name:/;
 s/^        /    /g;
 s/    Public Key Algorithm:/Public Key Algorithm:/g;
 s/, DNS:/,\n            DNS:/g'
-            cert=
-            echo ""
+                cert=
+                incert=
+            else
+                cert+="$line$nl"
+            fi
+        elif [[ $line =~ $begcert ]]; then
+            incert=1
+            cert="$line$nl"
+            if [ -n "$found" ]; then  echo ""; fi
+        elif [[ $line =~ $begother ]]; then
+            echo "  Includes ${BASH_REMATCH[1]}"
+        else
+            text+="$line$nl"
         fi
     done
-    <<<"$cert" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
+    <<<"$text" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
         sed -e's/^  *//g;s/^/    /g' | sort
     if [ -n "$found" ]; then
         return 0
@@ -95,19 +109,21 @@ function version() {
 
 function usage() {
     cat <<EOF
-Usage: $SELF [-C bundle] [-c type] [-s proto] [-t tlsver] [host [port]]
+Usage: $SELF [-C bundle] [-c type] [-s proto] [-t tlsver] [host[: port]]
 
 Display basic certificate information from a server or file
 Version $(version)
 
- If no host is specified, $HOSTS is read.  This contains lines HOST [PORT]
- or HOST[:PORT].   PORT defaults to 443.
+ If no host is specified, a file containing a list of hosts to query may
+ my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
+ PORT defaults to 443.
  If port is FILE, "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
   d: file       Debug information to file
+  f: file       File listing hosts to query
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 
@@ -133,8 +149,9 @@ STARTTLS=
 PROTO=
 CA="/etc/pki/tls/certs/ca_bundle.pem"
 DEBUG=
+HOSTS=
 
-while getopts "C:c:d:hs:t:" opt; do
+while getopts "C:c:d:f:hs:t:" opt; do
     case "$opt" in
         C)
             CA="$OPTARG"
@@ -145,6 +162,9 @@ while getopts "C:c:d:hs:t:" opt; do
         d)
             DEBUG="$OPTARG"
             true >"$DEBUG"
+            ;;
+        f)
+            HOSTS="$OPTARG"
             ;;
         h)
             usage
@@ -172,6 +192,11 @@ while getopts "C:c:d:hs:t:" opt; do
 done
 shift $((OPTIND-1))
 
+if [ -z "${HOSTS}$1" ]; then
+    echo "$SELF -h for usage" >&2
+    exit 1
+fi
+
 function exit_trap() {
     err="$?"
     if [[ -n "$ERRS" ]]; then
@@ -198,14 +223,16 @@ if [ -n "$CTYPE" ]; then
     fi
     CTYPE=(-sigalgs "$CTYPE")
 fi
-if [ -z "$1" ]; then
+FIRST=1
+if [ -n "$HOSTS" ]; then
     # Process hosts file
-    grep -E -v '(^#|^$)' "$HOSTS" |  while read -r HOST PORT
+    while read -r HOST PORT
     do
       if [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
           HOST="${BASH_REMATCH[1]}"
           PORT="${BASH_REMATCH[2]}"
       fi
+      if [ -z "$FIRST" ]; then echo ""; else FIRST= ; fi
       if [ "$PORT" = "FILE" ]; then
           echo "$HOST"
           if ! [ -r "$HOST" ]; then
@@ -216,28 +243,29 @@ if [ -z "$1" ]; then
       else
           hostcerts "$HOST" "$PORT"
       fi
-      echo ""
-    done
-    exit
+    done < <(grep -E -v '(^#|^$)' "$HOSTS")
 fi
 
 
 # Process host on command line
 
-HOST="$1"
-PORT="$2"
-if [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
-    HOST="${BASH_REMATCH[1]}"
-    PORT="${BASH_REMATCH[2]}"
-fi
-if [ "$PORT" = "FILE" ]; then
-    echo "$HOST"
-    if ! [ -r "$HOST" ]; then
-        echo "Can't read file $HOST" >&2
-        exit 1
+while [ -n "$1" ]; do
+    HOST="$1"
+    PORT=
+    shift
+    if [[ "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
+        HOST="${BASH_REMATCH[1]}"
+        PORT="${BASH_REMATCH[2]}"
     fi
-    info <"$HOST" 
-else
-    hostcerts "$HOST" "$PORT"
-fi
-echo ""
+    if [ -z "$FIRST" ]; then echo ""; else FIRST= ; fi
+    if [ "$PORT" = "FILE" ]; then
+        echo "$HOST"
+        if ! [ -r "$HOST" ]; then
+            echo "Can't read file $HOST" >&2
+            exit 1
+        fi
+        info <"$HOST"
+    else
+        hostcerts "$HOST" "$PORT"
+    fi
+done

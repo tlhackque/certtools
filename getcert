@@ -170,7 +170,7 @@ cmd=("openssl" "s_client" "-connect" "$SERVER:$PORT" "-servername" "$SERVER" "-C
 [ -n "$PROTO" ]          && cmd+=("$PROTO")
 
 nl=$'\n'
-begmark="^--+BEGIN"
+begmark="^--+BEGIN( TRUSTED)? CERTIFICATE"
 endmark="^--+END"
 cert=""
 incert=
@@ -188,11 +188,9 @@ while IFS='' read -r line ; do
         else
             cert+="$line$nl"
         fi
-    else
-        if [[ $line =~ $begmark ]]; then
-            incert="1"
-            cert="$line$nl"
-        fi
+    elif [[ $line =~ $begmark ]]; then
+        incert="1"
+        cert="$line$nl"
     fi
 done < <("${cmd[@]}" </dev/null )
 
