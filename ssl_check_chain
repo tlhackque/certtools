@@ -8,7 +8,7 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.006';
+our $VERSION = '$Id$';
 
 # License is in the POD at the end of this file.
 
@@ -471,7 +471,8 @@ if( $help || $man ) {
     Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if $man;
 }
 if( $version ) {
-    print( basename( $0 ) . " version $VERSION\n$copyright" );
+    printf( "%s version %s\n%s", basename( $0 ),
+            join( '-', ( $VERSION =~ /([[:xdigit:]]{4})/g )[ -4 .. -1 ] ), $copyright );
     exit;
 }
 $warn = 1 unless( defined $warn );
@@ -696,26 +697,6 @@ Bug reports, suggestions and patches are welcomed by the original author.
 
 I<openssl(1)>
 
+I<POD version $Id$>
+
 =cut
-
-my @ec_ciphers = ( qw/
-ECDHE-ECDSA-AES128-GCM-SHA256
-ECDHE-ECDSA-AES256-GCM-SHA384
-ECDHE-ECDSA-AES128-SHA256
-ECDHE-ECDSA-AES256-SHA384
-ECDHE-ECDSA-CHACHA20-POLY1305
-ECDHE-RSA-CHACHA20-POLY1305/ );
-
-my @rsa_ciphers = ( qw/
-ECDHE-RSA-AES128-GCM-SHA256
-ECDHE-RSA-AES256-GCM-SHA384
-ECDHE-RSA-AES128-SHA256
-ECDHE-RSA-AES256-SHA384
-ECDHE-RSA-AES128-SHA256
-ECDHE-RSA-AES256-SHA384
-DHE-RSA-AES128-GCM-SHA256
-DHE-RSA-AES256-GCM-SHA384
-DHE-RSA-AES128-SHA
-DHE-RSA-AES256-SHA
-DHE-RSA-AES128-SHA256
-DHE-RSA-AES256-SHA256/ );

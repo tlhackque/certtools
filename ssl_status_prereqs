@@ -11,7 +11,7 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.000';
+our $VERSION = '$Id$';
 
 my %mods = ( qw+
              Config            unknown

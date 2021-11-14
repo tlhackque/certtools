@@ -4,3 +4,6 @@
 .\#*
 *.swp
 *~
+*.tar
+*.tar.gz
+tests

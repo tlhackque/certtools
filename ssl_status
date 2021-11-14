@@ -8,7 +8,7 @@ Copyright (C) 2021 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
-our $VERSION = 'V1.001';
+our $VERSION = '$Id$';
 
 # License is in the POD at the end of this file.
 
@@ -38,6 +38,15 @@ sub dief($@) {
     my $fmt = shift;
 
     die( sprintf( $fmt, @_ ) );
+}
+
+sub formatVersion {
+    my( $version ) = @_;
+
+    if( ( my @version = $version =~ /([[:xdigit:]]{4})/g ) >= 4 ) {
+        return join( '-', @version[ -4 .. -1 ] );
+    }
+    return $version;
 }
 
 my $tmpdir = File::Spec->tmpdir || '.';
@@ -754,11 +763,13 @@ sub genHtmlReport {
 sub genHTML {
     my( $html, $title, $style ) = @_;
     my $nl = $debug ? "\n" : '';
-    my @tags = ( '<!DOCTYPE html>',
-                 '<head>',
-                 '<meta charset="iso-8859-1">',
-                 "<meta name=\"generator\" content=\"$prog $VERSION\">",
-                 '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+    my @tags = (
+            '<!DOCTYPE html>',
+            '<head>',
+            '<meta charset="iso-8859-1">',
+            sprintf( "<meta name=\"generator\" content=\"%s %s\">", $prog,
+                     formatVersion( $VERSION ) ),
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
                );
     push @tags, "<title>$title</title>"    if( $title );
     push @tags, "<style>$nl$style</style>" if( $style );
@@ -984,7 +995,7 @@ sub sendmsg {
     };
     $headers .= sprintf( "To: %s\n",
                          join( ',', ref( $msg->{To} ) ? @{ $msg->{To} } : $msg->{To} ) );
-    my $xm = sprintf( "X-Mailer: %s %s via", $prog, $VERSION );
+    my $xm = sprintf( "X-Mailer: %s %s via", $prog, formatVersion( $VERSION ) );
     $headers .= $xm . modver( ref $smtp, length $xm ) . "\n";
     $headers .= sprintf( "Subject: %s\n", $msg->{Subject} ) if( $msg->{Subject} );
     $headers .=
@@ -1287,7 +1298,7 @@ if( $help || $man ) {
     Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if $man;
 }
 if( $version ) {
-    print( $prog . " version $VERSION\n$copyright" );
+    printf( "%s version %s\n%s", $prog, formatVersion( $VERSION ), $copyright );
     exit;
 }
 $warn = 1 unless( defined $warn );
@@ -1922,5 +1933,7 @@ Bug reports, suggestions and patches are welcomed by the original author.
 =head1 SEE ALSO
 
 I<openssl(1)>
+
+I<POD version $Id$>
 
 =cut

@@ -1,2 +1,7 @@
 * text eol=lf
 
+* ident
+
+README.md.in export-ignore
+makereadme   export-ignore
+Makefile     export-ignore

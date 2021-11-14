@@ -20,7 +20,7 @@ Get server's TLS certificate
 Usage: getcert [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
- V1.1.0
+ Version cd97-8340-c673-0286
 
  Options:
   a             Report all certificates (including intermediates)
@@ -49,7 +49,7 @@ See LICENSE for license.
 Usage: ssl_info [-C bundle] [-c type] [-s proto] [-t tlsver] [host [port]]
 
 Display basic certificate information from a server or file
-V1.1.0
+Version cd97-8340-c673-0286
 
  If no host is specified, ./ssl_certs is read.  This contains lines HOST [PORT]
  or HOST[:PORT].   PORT defaults to 443.
@@ -158,3 +158,5 @@ Requires: Perl, OpenSSL
 
 See LICENSE for license.
 ````
+
+README version $Id$

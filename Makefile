@@ -1,4 +1,5 @@
 # Updates README and creates MD from Perl code's POD
+# Version $Id$
 
 all: ssl_status.md ssl_check_chain.md README.md
 

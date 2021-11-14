@@ -4,7 +4,8 @@
 #
 # Get SSL/TLS certificate from a server
 
-VERSION="1.1.0"
+#shellcheck disable=SC2016
+VERSION='$Id$'
 
 SELF="$(basename "$0")"
 
@@ -18,12 +19,21 @@ OUTPUT=
 PROTO=
 FOUNDCERT=
 
+function version() {
+    local ID="$VERSION"
+    if [[ "$ID" =~ [[:xdigit:]]{24}([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4}) ]]; then
+        printf "%s-%s-%s-%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+    else
+        printf "??%s" "$ID"
+    fi
+}
+
 function usage() {
     cat <<EOF
 Usage: $SELF [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
- V$VERSION
+ Version $(version)
 
  Options:
   a             Report all certificates (including intermediates)

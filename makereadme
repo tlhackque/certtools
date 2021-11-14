@@ -3,6 +3,8 @@
 use warnings;
 use strict;
 
+our $VERSION = '$Id$';
+
 undef $/;
 my $in = <STDIN>;
 while( @ARGV ) {

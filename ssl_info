@@ -2,7 +2,8 @@
 
 # Copyright (C) 2017, 2020, 2021 Timothe Litt <litt@acm.org>
 
-VERSION=1.1.0
+#shellcheck disable=SC2016
+VERSION='$Id$'
 
 SELF="$(basename "$0")"
 HOSTS="$(dirname "$0")/ssl_certs"
@@ -83,12 +84,21 @@ function hostcerts() {
     true >"$ERRS"
 }
 
+function version() {
+    local ID="$VERSION"
+    if [[ "$ID" =~ [[:xdigit:]]{24}([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4}) ]]; then
+        printf "%s-%s-%s-%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+    else
+        printf "??%s" "$ID"
+    fi
+}
+
 function usage() {
     cat <<EOF
 Usage: $SELF [-C bundle] [-c type] [-s proto] [-t tlsver] [host [port]]
 
 Display basic certificate information from a server or file
-V$VERSION
+Version $(version)
 
  If no host is specified, $HOSTS is read.  This contains lines HOST [PORT]
  or HOST[:PORT].   PORT defaults to 443.
