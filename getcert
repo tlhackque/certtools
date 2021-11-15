@@ -10,7 +10,9 @@ VERSION='$Id$'
 SELF="$(basename "$0")"
 
 PORT=
-CA="/etc/pki/tls/certs/ca_bundle.pem"
+CA="$SSL_CERT_FILE"
+[ -z "$CA" ] && CA="$CURL_CA_BUNDLE"
+[ -z "$CA" ] && CA="/etc/pki/tls/certs/ca_bundle.pem"
 DUMP="cat"
 ALL=
 CTYPE=
@@ -20,11 +22,11 @@ PROTO=
 FOUNDCERT=
 
 function version() {
-    local ID="$VERSION"
+    local ID="$1"
     if [[ "$ID" =~ [[:xdigit:]]{24}([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4}) ]]; then
         printf "%s-%s-%s-%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
     else
-        printf "??%s" "$ID"
+        printf "%s" "$ID"
     fi
 }
 
@@ -33,7 +35,7 @@ function usage() {
 Usage: $SELF [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
- Version $(version)
+ Version $(version "$VERSION")
 
  Options:
   a             Report all certificates (including intermediates)
@@ -163,7 +165,8 @@ trap "exit_trap" EXIT
 exec 22>&2-
 exec 2>"$ERRS"
 
-cmd=("openssl" "s_client" "-connect" "$SERVER:$PORT" "-servername" "$SERVER" "-CAfile" "$CA")
+cmd=("openssl" "s_client" "-connect" "$SERVER:$PORT" "-servername" "$SERVER")
+[ -n "$CA" ]             && cmd+=("-CAfile" "$CA")
 [ -n "$ALL" ]            && cmd+=("$ALL")
 [ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")
 [ "${#CTYPE}" -gt 0 ]    && cmd+=("${CTYPE[@]}")

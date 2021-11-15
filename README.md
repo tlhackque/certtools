@@ -54,7 +54,8 @@ Version c549-20c6-9824-dbf2
  If no host is specified, a file containing a list of hosts to query may
  my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
  PORT defaults to 443.
- If port is FILE, "host" is a PEM filename
+ If port is FILE or "host" starts with ., ~, or / or host includes a /,
+ "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification
