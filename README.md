@@ -27,7 +27,8 @@ Usage: getcert [-aCcdophs] server[:port]
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
   d             Decode certificate (as well as PEM)
-  o FILE        Output to FILE
+  i             Include minimal identifying information with PEM
+  o FILE        Output to FILE (default is stdout)
   p: port       Port number for connection (or use server:port)
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
@@ -35,6 +36,14 @@ Usage: getcert [-aCcdophs] server[:port]
  Establishes an SSL/TLS connection to the specified server and obtains
  the server's X.509 certificate.  The certificate (in PEM) format is
  written to stdout (or FILE), optionally with text decoding.
+
+ The PEM output (with or without -i) is suitable for input to any
+ OpenSSL tool and most applications that require certificates.  Those
+ that don't ignore text outside the PEM blocks will reject input
+ with the information added by -i.
+
+ See ssl_info if more complete (but less cryptic/cluttered than OpenSSL's)
+ information about the certificate/connection is desired.
 
  When working with dual-certificate servers, use -c RSA and -c ECDSA to
  select the desired certificate.
@@ -54,7 +63,8 @@ Version c549-20c6-9824-dbf2
  If no host is specified, a file containing a list of hosts to query may
  my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
  PORT defaults to 443.
- If port is FILE, "host" is a PEM filename
+ If port is FILE or "host" starts with ., ~, or / or host includes a /,
+ "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification

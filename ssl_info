@@ -9,15 +9,11 @@ SELF="$(basename "$0")"
 
 function info() {
     # Extract intresting lines; filter excess & reformat
-    local cert=
-    local incert=
-    local line=
-    local text=
+    local cert='' incert='' line='' text='' found='' CX=''
     local nl=$'\n'
     local begcert="^--+BEGIN( TRUSTED)? CERTIFICATE"
     local endcert="^--+END"
     local begother="--+BEGIN ([^-]*)--+$"
-    local found=
     while IFS='' read -r line; do
         if [ "$line" = "no peer certificate available" ]; then
             echo "$line" >&2
@@ -51,8 +47,10 @@ s/, DNS:/,\n            DNS:/g'
             text+="$line$nl"
         fi
     done
-    <<<"$text" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
-        sed -e's/^  *//g;s/^/    /g' | sort
+    CX="$(<<<"$text" grep -P 'Verification:|Verify return code:|, Cipher is |Peer sig(nature type|ning digest):' | \
+        sed -e's/^  *//g;s/^/    /g' | sort)"
+    [ -n "$CX" ] && printf "\n%s\n" "$CX"
+
     if [ -n "$found" ]; then
         return 0
     else
@@ -66,7 +64,8 @@ function hostcerts() {
     [ -z "$PORT" ] && PORT=443
     echo "$HOST:$PORT"
 
-    cmd=("openssl" "s_client" "-connect" "$HOST:$PORT" "-servername" "$HOST" "-showcerts" "-CAfile" "$CA")
+    cmd=("openssl" "s_client" "-connect" "$HOST:$PORT" "-servername" "$HOST" "-showcerts")
+    [ -n "$CA" ]             && cmd+=("-CAfile" "$CA")
     [ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")
     [ "${#CTYPE}" -gt 0 ]    && cmd+=("${CTYPE[@]}")
     [ -n "$PROTO" ]          && cmd+=("$PROTO")
@@ -99,11 +98,11 @@ function hostcerts() {
 }
 
 function version() {
-    local ID="$VERSION"
+    local ID="$1"
     if [[ "$ID" =~ [[:xdigit:]]{24}([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4})([[:xdigit:]]{4}) ]]; then
         printf "%s-%s-%s-%s" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
     else
-        printf "??%s" "$ID"
+        printf "%s" "$ID"
     fi
 }
 
@@ -112,12 +111,13 @@ function usage() {
 Usage: $SELF [-C bundle] [-c type] [-s proto] [-t tlsver] [host[: port]]
 
 Display basic certificate information from a server or file
-Version $(version)
+Version $(version "$VERSION")
 
  If no host is specified, a file containing a list of hosts to query may
  my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
  PORT defaults to 443.
- If port is FILE, "host" is a PEM filename
+ If port is FILE or "host" starts with ., ~, or / or host includes a /,
+ "host" is a PEM filename
 
  Options:
   C: bundle     CA bundle file for verification
@@ -147,7 +147,9 @@ EOF
 CTYPE=
 STARTTLS=
 PROTO=
-CA="/etc/pki/tls/certs/ca_bundle.pem"
+CA="$SSL_CERT_FILE"
+[ -z "$CA" ] && CA="$CURL_CA_BUNDLE"
+[ -z "$CA" ] && CA="/etc/pki/tls/certs/ca_bundle.pem"
 DEBUG=
 HOSTS=
 
@@ -228,7 +230,9 @@ if [ -n "$HOSTS" ]; then
     # Process hosts file
     while read -r HOST PORT
     do
-      if [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
+      if [[ -z "$PORT" && ( "$HOST" =~ ^[/.~] || "$HOST" =~ [/] ) ]]; then
+          PORT="FILE"
+      elif [[ -z "$PORT" &&  "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
           HOST="${BASH_REMATCH[1]}"
           PORT="${BASH_REMATCH[2]}"
       fi
@@ -246,14 +250,15 @@ if [ -n "$HOSTS" ]; then
     done < <(grep -E -v '(^#|^$)' "$HOSTS")
 fi
 
-
 # Process host on command line
 
 while [ -n "$1" ]; do
     HOST="$1"
     PORT=
     shift
-    if [[ "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
+    if [[ "$HOST" =~ ^[/.~] || "$HOST" =~ [/] ]]; then
+        PORT="FILE"
+    elif [[ "$HOST" =~ ^([^:]+):([^:]+)$ ]]; then
         HOST="${BASH_REMATCH[1]}"
         PORT="${BASH_REMATCH[2]}"
     fi
