@@ -3,7 +3,9 @@
 This repository contains a number of tools that make managing X.509
 certificates easier.  Note that the description in this README may
 not reflect the latest version.  Use the -h option for current
-information.
+information.  Full documentation for `ssl_check_chain` and `ssl_status`
+is available by using th `--man` option.  The corresponding `.md` files
+[ssl_check_chain.md](https://github.com/tlhackque/certtools/blob/master/ssl_check_chain.md) and [ssl_status.md](https://github.com/tlhackque/certtools/blob/master/ssl_status.md) in the repository have identical content, and can be consulted without installing the tools.
 
 Recent updates:
  - Added ssl_status reporting tool
@@ -12,6 +14,14 @@ Recent updates:
  - Improved error reporting
  - Non-Unix OS optimizations
  - Miscellaneous improvements
+
+## Installation
+
+ - Download the `.tar.gz` file from [GitHub](https://github.com/tlhackque/certtools/releases).
+ - Unpack the archive, and move the script(s) to a directory on your path
+ - If desired, move the `.1` files to someplace in `MANPATH` (or man's config).  The `--man` option's output is identical.
+ - `ssl_status_prereqs` may be used to verify that you have the Perl modules used by `ssl_status`
+ - It is **not** necessary to clone the repository unless you wish to contribute patches.  The repository contains some files used to build the distribution, which are not required to install or use the tools.
 
 ## getcert
 Get server's TLS certificate
