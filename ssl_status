@@ -189,7 +189,7 @@ sub days {
 
 # Option values
 my(   @contents,     $debug,     $email_from,    @email_to,      $warn, $inifile,
-      @smtp_servers, $smtp_user, $smtp_password, $smtp_ssl_mode, $logo,
+      @smtp_servers, $smtp_user, $smtp_password, $smtp_ssl_mode, $logo, $brief,
       $help,         $man,       $version, );
 
 # Execute command & print unexpected errors
@@ -678,6 +678,7 @@ sub genTextReport {
                       ( $col->{last} ? "\n" : ' ' ) );
     }
 
+    my $phost;
     foreach my $cert ( @$data ) {
         foreach my $col ( @$columns ) {
             my $from = $col->{from};
@@ -688,6 +689,14 @@ sub genTextReport {
                 $val = $cert->{$from};
             }
             $val = 'Unknown' unless( defined $val );
+            if( $brief && $col->{name} eq 'Host' ) {
+                if( $phost && $phost eq $val ) {
+                    $val = '';
+                } else {
+                    $phost = $val;
+
+                }
+            }
             if( $col->{wrap} && length $val > $col->{width} ) {
                 print $out ( "$val\n" );
                 my $wp = 0;
@@ -722,6 +731,7 @@ sub genHtmlReport {
         printf $out ( "<th>%s</th>", $col->{name} );
     }
     printf $out ( "</tr>$nl</thead>$nl<tbody>$nl" );
+    my $phost;
     foreach my $cert ( @$data ) {
         printf $out ( "<tr>" );
         foreach my $col ( @$columns ) {
@@ -733,6 +743,14 @@ sub genHtmlReport {
                 $val = $cert->{$from};
             }
             $val = 'Unknown' unless( defined $val );
+            if( $brief && $col->{name} eq 'Host' ) {
+                if( $phost && $phost eq $val ) {
+                    $val = '&nbsp;';
+                } else {
+                    $phost = $val;
+
+                }
+            }
             my $class = $col->{class} || '';
             $class .= ' right' if( $col->{j} );
             if( exists $col->{match} ) {
@@ -1260,6 +1278,7 @@ sub smtpfail {
         return \%vals;
     }
     @globaloptions = ( "debug|d!"                   => \$debug,
+                       "brief!"                     => \$brief,
                        "email-from|e-mail-from=s"   => \$email_from,
                        "no-email-from|noemail-from" => sub { undef $email_from },
                        "email-to|e-mail-to=s"       => \@email_to,
@@ -1301,7 +1320,8 @@ if( $version ) {
     printf( "%s version %s\n%s", $prog, formatVersion( $VERSION ), $copyright );
     exit;
 }
-$warn = 1 unless( defined $warn );
+$warn  = 1 unless( defined $warn );
+$brief = 1 unless( defined $brief );
 
 if( $inifile && defined $smtp_password ) {
     eval q{
@@ -1642,6 +1662,7 @@ ssl_status - check the certificate status for hosts and files
 ssl_status [options] [host[:port] ...] [file:FILE] [@file...]
 
  Options:
+   --brief              Abbreviate report
    --CAfile=file        Specify bundle file of trusted CA certificates for verification
    --CApath=dir         Specify a hashed directory containing trusted CA certificates for verification.
    --email-to=list      Specify email address(es) to receive reports
@@ -1679,7 +1700,15 @@ files.
 
 =over 8
 
-=item B<--CAfile>=I<file> B<--no-CAfile> I<@file>
+=item B<--brief> B<--no-brief>
+
+Abbreviate report contents for easier reading (default).  Use B<--no-brief> if output will be parsed by a script.
+
+Currently, B<--brief> avoids repeating the hostname in adjacent rows, but this may be changed.
+Note that if a host's certificates expire on different dates, data from other hosts may prevent
+abbreviation.
+
+=item B<--CAfile>=I<file> B<--no-CAfile>
 
 Specify a file containing one or more trusted CA certificates to verify the host's certificate chain.
 

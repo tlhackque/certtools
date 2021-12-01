@@ -7,6 +7,7 @@ ssl\_status - check the certificate status for hosts and files
 ssl\_status \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
 
     Options:
+      --Brief              Abbreviate report
       --CAfile=file        Specify bundle file of trusted CA certificates for verification
       --CApath=dir         Specify a hashed directory containing trusted CA certificates for verification.
       --email-to=list      Specify email address(es) to receive reports
@@ -42,7 +43,15 @@ continued) line on which they occur.  When used on the command line or initializ
 they affect systems listed there, and also serve as defaults for systems lised in indirect command
 files.
 
-- **--CAfile**=_file_ **--no-CAfile** _@file_
+- **--brief** **--no-brief**
+
+    Abbreviate report contents for easier reading (default).  Use **--no-brief** if output will be parsed by a script.
+
+    Currently, **--brief** avoids repeating the hostname in adjacent rows, but this may be changed.
+    Note that if a host's certificates expire on different dates, data from other hosts may prevent
+    abbreviation.
+
+- **--CAfile**=_file_ **--no-CAfile**
 
     Specify a file containing one or more trusted CA certificates to verify the host's certificate chain.
 

@@ -129,7 +129,7 @@
 .\" ========================================================================
 .\"
 .IX Title "SSL_STATUS 1"
-.TH SSL_STATUS 1 "14-Nov-2021 08:48:02" "" "Certificate Tools"
+.TH SSL_STATUS 1 "01-Dec-2021 07:17:17" "" "Certificate Tools"
 .\" For nroff, turn off justification.  Always turn off hyphenation; it makes
 .\" way too many mistakes in technical documents.
 .if n .ad l
@@ -143,6 +143,7 @@ ssl_status [options] [host[:port] ...] [file:FILE] [@file...]
 .PP
 .Vb 10
 \& Options:
+\&   \-\-Brief              Abbreviate report
 \&   \-\-CAfile=file        Specify bundle file of trusted CA certificates for verification
 \&   \-\-CApath=dir         Specify a hashed directory containing trusted CA certificates for verification.
 \&   \-\-email\-to=list      Specify email address(es) to receive reports
@@ -177,8 +178,15 @@ When used in an indrect command file, they affect only systems mentioned on the 
 continued) line on which they occur.  When used on the command line or initialization file,
 they affect systems listed there, and also serve as defaults for systems lised in indirect command
 files.
-.IP "\fB\-\-CAfile\fR=\fIfile\fR \fB\-\-no\-CAfile\fR \fI\f(CI@file\fI\fR" 8
-.IX Item "--CAfile=file --no-CAfile @file"
+.IP "\fB\-\-brief\fR \fB\-\-no\-brief\fR" 8
+.IX Item "--brief --no-brief"
+Abbreviate report contents for easier reading (default).  Use \fB\-\-no\-brief\fR if output will be parsed by a script.
+.Sp
+Currently, \fB\-\-brief\fR avoids repeating the hostname in adjacent rows, but this may be changed.
+Note that if a host's certificates expire on different dates, data from other hosts may prevent
+abbreviation.
+.IP "\fB\-\-CAfile\fR=\fIfile\fR \fB\-\-no\-CAfile\fR" 8
+.IX Item "--CAfile=file --no-CAfile"
 Specify a file containing one or more trusted \s-1CA\s0 certificates to verify the host's certificate chain.
 .Sp
 If not specified, the environment variables \s-1SSL_CERT_FILE\s0 and \s-1CURL_CA_BUNDLE\s0 will be tried, and if neither of them is set, OpenSSL's default will be used.
