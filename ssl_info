@@ -32,7 +32,7 @@ s/    X509v3 Subject Alternative Name:/Subject Alternative Name:/;
 s/^        /    /g;
 s/    Public Key Algorithm:/Public Key Algorithm:/g;
 s/, DNS:/,\n            DNS:/g;
-s/^\( *Issued : \| *Expires:\)\(.*\)/echo "\1\2 ($(date -d"\2"))"/e'
+s,^\( *Issued : *\| *Expires: *\)\(.*\),echo "\1\2 ($(date -d"\2" 2>/dev/null))",e'
                 cert=
                 incert=
             else
