@@ -1,7 +1,7 @@
 # Updates README and creates MD and man (.1) from Perl code's POD
 # Version $Id$
 
-all: ssl_status.md ssl_check_chain.md ssl_status.1 ssl_check_chain.1 README.md
+all: ssl_status.md ssl_check_chain.md ssl_status.1 ssl_check_chain.1 acme_token_check acme_token_check.1 README.md
 
 README.md : README.md.in getcert ssl_info makereadme
 	 ./makereadme getcert ssl_info <README.md.in >$@

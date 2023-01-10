@@ -3,11 +3,15 @@
 This repository contains a number of tools that make managing X.509
 certificates easier.  Note that the description in this README may
 not reflect the latest version.  Use the -h option for current
-information.  Full documentation for `ssl_check_chain` and `ssl_status`
+information.  Full documentation for `acme_token_check`, `ssl_check_chain` and `ssl_status`
 is available by using th `--man` option.  The corresponding `.md` files
-[ssl_check_chain.md](https://github.com/tlhackque/certtools/blob/master/ssl_check_chain.md) and [ssl_status.md](https://github.com/tlhackque/certtools/blob/master/ssl_status.md) in the repository have identical content, and can be consulted without installing the tools.
+[acme_token_check.md](https://github.com/tlhackque/certtools/blob/master/acme_token_check.md),
+[ssl_check_chain.md](https://github.com/tlhackque/certtools/blob/master/ssl_check_chain.md), and
+[ssl_status.md](https://github.com/tlhackque/certtools/blob/master/ssl_status.md)
+in the repository have identical content, and can be consulted without installing the tools.
 
 Recent updates:
+ - Added acme_token_check
  - Added ssl_status reporting tool
  - Server certificate selection is more reliable
  - Markdown manual pages are extracted from the POD
@@ -68,7 +72,7 @@ See LICENSE for license.
 Usage: ssl_info [-C bundle] [-c type] [-s proto] [-t tlsver] [host[: port]]
 
 Display basic certificate information from a server or file
-Version c549-20c6-9824-dbf2
+Version af5b-3183-6fb8-d9d1
 
  If no host is specified, a file containing a list of hosts to query may
  my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
@@ -180,5 +184,21 @@ Requires: Perl, OpenSSL
 
 See LICENSE for license.
 ````
+
+## acme_token_check
+
+Reports, and optionally removes `_acme-challenge` TXT records from the DNS.
+
+These can be left-over from ACME-based certificate issuance, when the tools
+or systems that they run on fail.
+
+Suitable to be run as a `cron` job.
+
+For details, see acme_token_check.md, or use --man.
+
+
+Requires: Perl
+
+See LICENSE for license.
 
 README version $Id$

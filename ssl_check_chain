@@ -468,7 +468,7 @@ if( $help || $man ) {
         die( "Install Pod::Usage or use 'perldoc $0'\n" );
 
     Pod::Usage::pod2usage( 1 )                            if( $help );
-    Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if $man;
+    Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if( $man );
 }
 if( $version ) {
     printf( "%s version %s\n%s", basename( $0 ),

@@ -7,7 +7,7 @@ ssl\_status - check the certificate status for hosts and files
 ssl\_status \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
 
     Options:
-      --Brief              Abbreviate report
+      --brief              Abbreviate report
       --CAfile=file        Specify bundle file of trusted CA certificates for verification
       --CApath=dir         Specify a hashed directory containing trusted CA certificates for verification.
       --email-to=list      Specify email address(es) to receive reports

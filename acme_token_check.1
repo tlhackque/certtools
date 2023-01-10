@@ -128,118 +128,142 @@
 .rm #[ #] #H #V #F C
 .\" ========================================================================
 .\"
-.IX Title "SSL_CHECK_CHAIN 1"
-.TH SSL_CHECK_CHAIN 1 "10-Jan-2023 12:15:39" "" "Certificate Tools"
+.IX Title "ACME_TOKEN_CHECK 1"
+.TH ACME_TOKEN_CHECK 1 "10-Jan-2023 12:40:03" "" "Certificate Tools"
 .\" For nroff, turn off justification.  Always turn off hyphenation; it makes
 .\" way too many mistakes in technical documents.
 .if n .ad l
 .nh
-.SH "SSL_CHECK_CHAIN"
-.IX Header "SSL_CHECK_CHAIN"
-ssl_check_chain \- check the certificate chain for hosts
+.SH "ACME_TOKEN_CHECK"
+.IX Header "ACME_TOKEN_CHECK"
+acme_token_check \- check \s-1DNS\s0 domain(s) for stray \s-1ACME\s0 tokens
 .SH "SYNOPSIS"
 .IX Header "SYNOPSIS"
-ssl_check_chain [options] [host[:port] ...] [file:FILE] [@file...]
+acme_token_check [options] [domain ...]
 .PP
-.Vb 10
-\& Options:
-\&   \-\-CAfile=file     Specify bundle file of trusted CA certificates for verification
-\&   \-\-CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
-\&   \-\-starttls=proto  Specify that STARTTLS should be used in the connection.
-\&   \-\-timeout=secs    Specify timeout for TLS connections
-\&   \-\-tlsversion=ver  Specify the version TLS to connect with
-\&   \-\-type=type       Specify the certificate type desired from the server
-\&   \-\-[no\-]warnings   Display or suppress warnings
-\&   \-\-help            brief help message
-\&   \-\-man             full documentation
+.Vb 4
+\&  Options
+\&    \-\-debug           \-\-library   \-\-nameservers  \-\-recurse  \-\-remove
+\&    \-\-source\-address  \-\-tsig\-key  \-\-unsigned     \-\-verbose  \-\-view
+\&    \-\-help            \-\-man       \-\-version
 .Ve
+.PP
+If no domain is specified, all domains in \fI\f(CI%TL::Netconfig::domains\fI\fR are checked,
+except for any in \fI.arpa\fR or \fIlocalhost\fR.
 .SH "OPTIONS"
 .IX Header "OPTIONS"
-The short options take the same argument as the corresponding long options, and are provided
-for compatibility with \fIssl_info\fR
-.IP "\fB\-\-CAfile\fR=\fIfile\fR \fB\-C\fR" 8
-.IX Item "--CAfile=file -C"
-Specify a file containing one or more trusted \s-1CA\s0 certificates to verify the host's certificate chain.
+.IP "\fB\-d\fR \fB\-\-[no]debug\fR" 8
+.IX Item "-d --[no]debug"
+Display debugging output from \s-1DNS\s0 queries.
+.IP "\fB\-\-library\fR=\fIpath\fR" 8
+.IX Item "--library=path"
+Library path for PerlLib modules.
+.IP "\fB\-\-nameservers\fR\-\fIaddr,...\fR" 8
+.IX Item "--nameservers-addr,..."
+Name(s) and/or Address(es) of nameservers to use.
+.IP "\fB\-\-[no]recurse\fR" 8
+.IX Item "--[no]recurse"
+Process delegations (subzones) of the specified domains.  Default is \fB\-\-recurse\fR,
+.IP "\fB\-r\fR \fB\-\-[no]remove\fR" 8
+.IX Item "-r --[no]remove"
+Remove all records found.  Default is \fB\-\-noremove\fR.
+.IP "\fB\-s\fR \fB\-\-source\-address\fR=\fIaddress\fR" 8
+.IX Item "-s --source-address=address"
+Send queries from \fIaddress\fR.  Default is any local address.
+.IP "\fB\-k\fR \fB\-\-tsig\-key\fR=\fIfile\fR" 8
+.IX Item "-k --tsig-key=file"
+Specify a file containing \s-1TSIG\s0 key to use for the domain(s).
 .Sp
-If not specified, the environment variables \s-1SSL_CERT_FILE\s0 and \s-1CURL_CA_BUNDLE\s0 will be tried, and if neither of them is set, OpenSSL's default will be used.
-.IP "\fB\-\-CApath\fR=\fIfile\fR \fB\-\-CAdir\fR=\fIfile\fR" 8
-.IX Item "--CApath=file --CAdir=file"
-Specify a directory containing hashed links to one or more trusted \s-1CA\s0 certificates to verify the host's certificate chain.
+Default is to use the 'external' key specified in \fITL::NetConfig\fR.
+.IP "\fB\-u\fR \fB\-\-unsigned\fR" 8
+.IX Item "-u --unsigned"
+Do not sign queries or updates with \s-1TSIG.\s0
+.IP "\fB\-V\fR \fB\-\-view\fR=\fIname\fR" 8
+.IX Item "-V --view=name"
+Specify view to be used if \fB\-\-tsig\-ky\fR is defaulted.
+.IP "\fB\-v\fR \fB\-\-[no]verbose\fR" 8
+.IX Item "-v --[no]verbose"
+Report all findings/actions.
 .Sp
-If not specified, the environment variable \s-1SSL_CERT_DIR\s0 will be tried.  If it is not set, OpenSSL's default will be used.
-.IP "\fB\-\-starttls\fR=\fIprotocol\fR \fB\-s\fR" 8
-.IX Item "--starttls=protocol -s"
-Specifies that \s-1STARTTLS\s0 is required to make the \s-1TLS\s0 connection.
-.Sp
-\&\fIprotocol\fR is one of the following:  \*(L"smtp\*(R", \*(L"pop3\*(R", \*(L"imap\*(R", \*(L"ftp\*(R", \*(L"xmpp\*(R",
-           \*(L"xmpp-server\*(R", \*(L"irc\*(R", \*(L"postgres\*(R", \*(L"mysql\*(R", \*(L"lmtp\*(R", \*(L"nntp\*(R", \*(L"sieve\*(R", or \*(L"ldap\*(R"
-.IP "\fB\-\-timeout\fR=\fIsecs\fR \fI\f(CI@file\fI\fR" 8
-.IX Item "--timeout=secs @file"
-Speciries the maximum amount of time that \fIssl_check_chain\fR will wait for a \s-1TLS\s0 connection.
-.Sp
-The default is 120 seconds.
-.IP "\fB\-\-tlsversion\fR=\fIversion\fR" 8
-.IX Item "--tlsversion=version"
-Specify the \s-1TLS\s0 protocol version to use: 1.1, 1.2, or 1.3.
-.IP "\fB\-\-type\fR=\fItype\fR \fB\-c\fR" 8
-.IX Item "--type=type -c"
-Specify that an \fIec\fR (\fIecdsa\fR) or \fIrsa\fR certificate is desired.
-.IP "\fB\-\-[no\-]warnings\fR" 8
-.IX Item "--[no-]warnings"
-Controls whether warning messages are displayed.  The default is \fB\-\-warnings\fR.
-.Sp
-Warnings include duplicated files and hosts, which are skipped, and other recoverable conditions.
+Default is to report totals if any records are found, and to report errors.
 .IP "\fB\-\-help\fR" 8
 .IX Item "--help"
-Print a brief help message and exits.
+Print a brief help message and exit.
 .IP "\fB\-\-man\fR" 8
 .IX Item "--man"
-Prints the manual page and exits.
-.PP
-When options require keyword values, the keyword may be abbreviated providing that the abbreviation is unique.
+Print the manual page and exit.
 .SH "DESCRIPTION"
 .IX Header "DESCRIPTION"
-\&\fBssl_check_chain\fR will connect to each host specified and obtain its certificate and any intermediate certificate chain.
+\&\fBacme_token_check\fR scans the specified domain(s) and any subdomains for \fB\s-1TXT\s0\fR records
+of the form:
 .PP
-Port can be numeric, or a service name (e.g. from /etc/services).
+.Vb 1
+\&    _acme\-challenge.*
+.Ve
 .PP
-If a port is not specified: if \-\-starttls is specified, the default port for the \s-1STARTTLS\s0 protocol is used, otherwise 443 (https) is assumed.
+With \fB\-\-verbose\fR tnose found will be reported.
 .PP
-If the port is specified as \fI\s-1FILE\s0\fR, \fBssl_check_chain\fR will open the specified file and process it as if the certificates were received from a server.
-The certificate chain must be in \s-1PEM\s0 format.  If a filename begins with '.', '/', or '~', or if it contains a '/', the \fI:FILE\fR is inferred, since
-no \s-1DNS\s0 hostname or \s-1IP\s0 address can have those forms.
+With \fB\-\-remove\fR, those found will be removed from the \s-1DNS.\s0
 .PP
-If an argument is of the form \fI\f(CI@file\fI\fR, the file is processed as a list of arguments, one per line, in any of the forms described previously.
-\&\fI\f(CI@file\fI\fRs can be nested, but attempting to process the same file more than once is an error.  In an \fI\f(CI@file\fI\fR, blank lines and lines beginning with \fI#\fR are ignored.
+These records are created when the \s-1ACME\s0 protocol is used to obtain \s-1TLS\s0 certificates.,
+validating domain ownership with its \fI\s-1DNS\-01\s0\fR option.
 .PP
-\&\fI\s-1FILE\s0\fR and \fI\f(CI@file\fI\fR names support tilde expansion, but not wildcards.
+They should be removed, but system or software failures can leave them in the \s-1DNS.\s0
 .PP
-The validity dates of each certificate returned will be verified, as will its chain.
+\&\fBacme_token_check\fR performs a zone transfer (\s-1AXFR\s0) in order to locate the
+text records.  If requested, it uses \s-1DNS UPDATE\s0 to remove them.  The nameserver
+must be configured to permit these transactions.
 .PP
-To request the desired certificate from  dual-certificate servers, you can specify \fB\-\-type\fR=\fIec\fR or \fB\-\-type\fR=\fIrsa\fR.
-This is done by providing a list of acceptable signature algorithms; the connecion will fail if the server doesn't have a matching certificate.
+When run at a time that no renewals are active, \fBacme_token_check\fR provides a means
+to detect and remove leftover challenge records.  By default, it only generates output
+if records are found or errors are encountered, making it suitable for a \fIcron\fR job.
+Such \fIcron\fR jobs should be scheduled when they will not interfere with certificate
+renewals.
 .PP
-You can also specify \fB\-\-tlsversion\fR=\fI1.1\fR, \fB\-\-tlsversion\fR=\fI1.2\fR, or \fB\-\-tlsversion\fR=\fI1.3\fR to select the protocol version.
+Communications with the nameserver are signed with \s-1TSIG\s0 unless \fB\-\-unsigned\fR is
+specified.  \fB\-\-unsigned\fR communications are adequate when \s-1TSIG\s0 is not used for
+view selection, zone transfer authentication, or update authentication.
 .PP
-Each certificate is analyzed in the order received from the server or contained in the file, which should be from leaf (the server) toward the root (trusted \s-1CA\s0).
-The trust root is not sent by the server, but is located by OpenSSL via \-CAfile or \-CApath.
+If \s-1TSIG\s0 is not used, the nameserver is presumed to handle any view selection,
+and authentication based on \s-1IP\s0 address.  In this case, if the host running
+\&\fBacme_token_check\fR is multi-homed, \fB\-\-source\-address\fR can be used to ensure
+that transactions use an authorized address to communicate with the \s-1DNS\s0 servers.
 .PP
-Any date or verification errors will be reported.
-.PP
-Note that if a trusted (root) certificate has expired, only the root name is available.
-.PP
-This automates the manual process of determining where and why a certificate chain is broken.
+\&\fBPerlLib\fR is a non-public library.  It is not required if a domain, \fB\-\-nameserver\fR
+and \fB\-\-tsig\-key\fR (or \fB\-\-unsigned\fR) are specified.  Otherwise, \fBacme_token_check\fR will
+try to load modules from PerlLib to obtain defaults for these options.
+.SH "RETURN VALUE"
+.IX Header "RETURN VALUE"
+The exit code provides summary status.  Values are ORed if more than one applies.
+.IP "0 Success" 4
+.IX Item "0 Success"
+.PD 0
+.IP "1 A zone transfer failed." 4
+.IX Item "1 A zone transfer failed."
+.IP "2 A challenge token record was found." 4
+.IX Item "2 A challenge token record was found."
+.IP "4 A \s-1DNS\s0 server refused to delete a challenge token record." 4
+.IX Item "4 A DNS server refused to delete a challenge token record."
+.IP "8 A \s-1DNS\s0 server did not return a reply to a delete request." 4
+.IX Item "8 A DNS server did not return a reply to a delete request."
+.IP "255 Error in command or unhandled error from a module." 4
+.IX Item "255 Error in command or unhandled error from a module."
+.PD
 .SH "BUGS"
 .IX Header "BUGS"
 Report any bugs, feature requests and/or patches on the issue tracker,
 located at \fIhttps://github.com/tlhackque/certtools/issues\fR.  In the
 event that the project moves, contact the author directly.
+.PP
+\&\fINet::DNS\fR prevents efficient connection reuse when \fB\-\-recurse\fR is
+used.  See RT#145835 <https://rt.cpan.org/Ticket/Display.html?id=145835>
+Work-around adjusts timing at the cost of some memory.
 .SH "AUTHOR"
 .IX Header "AUTHOR"
 Timothe Litt  <litt@acm.org>
 .SH "COPYRIGHT and LICENSE"
 .IX Header "COPYRIGHT and LICENSE"
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2023 Timothe Litt
 .PP
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the \*(L"Software\*(R"),
@@ -269,6 +293,4 @@ attributed to their author, who is responsible for their effects.
 Bug reports, suggestions and patches are welcomed by the original author.
 .SH "SEE ALSO"
 .IX Header "SEE ALSO"
-\&\fI\fIopenssl\fI\|(1)\fR \fIssl_info\fR
-.PP
-\&\fI\s-1POD\s0 version \f(CI$Id$\fR
+\&\fImod_md\fR \fIgetssl\fR \fIuacme\fR \fI\s-1RFC8555\s0\fR ...

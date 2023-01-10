@@ -19,7 +19,10 @@ ssl\_check\_chain \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
 
 # OPTIONS
 
-- **--CAfile**=_file_
+The short options take the same argument as the corresponding long options, and are provided
+for compatibility with `ssl_info`
+
+- **--CAfile**=_file_ **-C**
 
     Specify a file containing one or more trusted CA certificates to verify the host's certificate chain.
 
@@ -31,7 +34,7 @@ ssl\_check\_chain \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
 
     If not specified, the environment variable SSL\_CERT\_DIR will be tried.  If it is not set, OpenSSL's default will be used.
 
-- **--starttls**=_protocol_
+- **--starttls**=_protocol_ **-s**
 
     Specifies that STARTTLS is required to make the TLS connection.
 
@@ -48,7 +51,7 @@ ssl\_check\_chain \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
 
     Specify the TLS protocol version to use: 1.1, 1.2, or 1.3.
 
-- **--type**=_type_
+- **--type**=_type_ **-c**
 
     Specify that an _ec_ (_ecdsa_) or _rsa_ certificate is desired.
 
@@ -144,6 +147,6 @@ Bug reports, suggestions and patches are welcomed by the original author.
 
 # SEE ALSO
 
-_openssl(1)_
+_openssl(1)_ _ssl\_info_
 
 _POD version $Id$_

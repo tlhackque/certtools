@@ -1,0 +1,422 @@
+#!/usr/bin/perl
+
+# Net::DNS requires at least 5.8.9
+
+use 5.28.0;
+
+our $VERSION = '$Id$';
+
+my $copyright = << 'COPYRIGHT';
+Copyright (C) 2021-2023 Timothe Litt <litt at acm.org>
+Use --man for license information.
+COPYRIGHT
+
+use warnings;
+use strict;
+
+use File::Basename;
+use Getopt::Long( qw/:config bundling/ );
+use Net::DNS;
+
+sub checkZone;
+sub removeRecord;
+sub indent;
+sub cleandiemsg;
+
+my $self = basename( $0 );
+
+my( $debug,   @domains, @ns, $lib, $recurse, $remove, $srcaddr, $tsig, $unsigned,
+    $verbose, $view,
+    $help,    $man, $version );
+
+GetOptions(
+        "debug|d!"           => \$debug,
+        "library=s"          => \$lib,
+        "nameservers|n=s"    => \@ns,
+        "recurse!"           => \$recurse,
+        "remove|r!"          => \$remove,
+        "source-address|s=s" => \$srcaddr,
+        "tsig-key|k=s"       => \$tsig,
+        "unsigned|u!"        => \$unsigned,
+        "verbose|v!"         => \$verbose,
+        "view|V=s"           => \$view,
+        'help|?|h'           => \$help,
+        'man'                => \$man,
+        'version'            => \$version,
+          ) or die( "Command line error, --help for usage\n" );
+if( $help || $man ) {
+    eval {
+        no warnings 'once';
+        $Pod::Usage::Formatter = 'Pod::Text::Termcap';
+        require Pod::Usage;
+    } or
+        die( "Install Pod::Usage or use 'perldoc $0'\n" );
+
+    Pod::Usage::pod2usage( 1 )                            if( $help );
+    Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if( $man );
+}
+if( $version ) {
+    printf( "%s version %s\n%s", $self,
+            join( '-', ( $VERSION =~ /([[:xdigit:]]{4})/g )[ -4 .. -1 ] ), $copyright );
+    exit;
+}
+
+$recurse = 1 unless( defined $recurse );
+@ns      = split( /, ?/, join( ',', @ns ) );
+
+# Use PerlLib if any argument needs it to obtain a default value.
+# PerlLib is not released to the public, but is not required..
+
+unless(    @ARGV
+        && ( $unsigned || ( defined $tsig && length $tsig ) )
+        && @ns ) {
+    $lib = "/var/www/PerlLib" unless( defined $lib );
+    unshift( @INC, $lib );
+    eval {
+        require TL::DNS::Hostinfo;
+        require TL::NetConfig;
+    };
+    $! = 255;
+    die( "A domain, --nameserver, and --tsig-key or --unsigned must be specified\n" )
+        if( $@ );
+    no warnings 'once';
+
+    @ARGV = ( grep { $_ !~ /(?:\.arpa|^localhost)\.$/ } keys %TL::NetConfig::domains )
+        unless( @ARGV );
+    unless( $unsigned || ( defined $tsig && length $tsig ) ) {
+        $view = 'external' unless( defined $view );
+        $tsig = $TL::NetConfig::dnsKeyFiles{$view};
+        die( "Unknown view \"$view\"\n" ) unless( defined $tsig && length $tsig );
+    }
+}
+
+# %zones: 1 = In domain list  2 = processed
+
+my %zones   = map { $_ .= '.' unless( /\.$/ ); ( $_ => 1 ) } @ARGV;
+my $found   = 0;
+my $removed = 0;
+my $sts     = 0;
+
+my $res = Net::DNS::Resolver->new( recurse        => 0,
+                                   persistent_tcp => 1,
+                                   persistent_udp => 1,
+                                   defnames       => 0,
+                                   dnsrch         => 0,
+                                   debug          => $debug,
+                                 );
+$res->srcaddr( $srcaddr ) if( defined $srcaddr && length $srcaddr );
+unless( $unsigned ) {
+    eval { $res->tsig( $tsig ); };
+    if( $@ ) {
+        printf( "TSIG: %s\n", cleandiemsg( $@ ) );
+        exit 255;
+    }
+}
+
+$found += checkZone( $res, shift @ARGV ) while( @ARGV );
+
+if( $verbose || $found ) {
+    printf( "%u acme challenge %s found\n", $found, $found == 1 ? 'record' : 'records' );
+    printf( "%u acme challenge %s removed\n", $removed,
+            $removed == 1 ? 'record' : 'records' )
+        if( $remove );
+}
+exit $sts;
+
+# Check a zone
+
+sub checkZone {
+    my( $res, $zone ) = @_;
+
+    my $nf = 0;
+    return $nf if( $zones{$zone} & 2 );  # Process only oncce
+    $zones{$zone} |= 2;
+    printf( "Checking %s\n", $zone ) if( $verbose );
+
+    $@ = '';
+    my $ns = @ns ? [@ns] : eval { TL::DNS::Hostinfo::getDNSserverList( $zone ) };
+    unless( $ns && @$ns ) {
+        printf( "Checking %s\n", $zone ) unless( $verbose );
+        printf( "  ... skipping %s: %s\n", $zone, cleandiemsg( $@ ) || "No nameservers" );
+        return $nf;
+    }
+    if( $verbose ) {
+        printf( "  ... using NS" );
+        printf( " %s", $_ ) foreach( @$ns );
+        printf( "\n" );
+    }
+    $res->nameservers( @$ns );
+
+    my $it = eval { return $res->axfr( $zone, 'IN' ) };
+    if( $@ || !$it ) {
+        $sts |= 1;
+        printf( "Checking %s\n", $zone ) unless( $verbose );
+        printf( "  Zone transfer failed: %s\n%s\n", $res->errorstring,
+                indent( 2, cleandiemsg( $@ ) ) );
+        return $nf;
+    }
+    while( my $rr = eval { $it->() } ) {
+        my $rtype = $rr->type;
+        if( $rtype eq 'NS' ) {
+            if( $recurse ) {
+                my $owner = $rr->owner . '.';
+                unless( $zones{$owner} ) {  # Not seen previously
+                    unshift @ARGV, $owner;
+                    $zones{$owner} = 1;
+                }
+            }
+        } elsif( $rtype eq 'TXT' && $rr->owner =~ /^_acme-challenge\./i ) {
+            $sts |= 2;
+            printf( "Checking %s\n", $zone ) unless( $nf++ || $verbose );
+            printf( "  Found %s\n",  $rr->plain );
+            removeRecord( $res, $zone, $rr ) if( $remove );
+        }
+    }
+    if( $@ ) {
+        $sts |= 1;
+        printf( "Checking %s\n", $zone ) unless( $nf || $verbose );
+        printf( "  Zone transfer incomplete: %s\n%s\n", $res->errorstring,
+                indent( 2, cleandiemsg( $@ ) ) );
+        return $nf;
+    }
+    return $nf;
+}
+
+# Remove a stray TXT RR
+
+sub removeRecord {
+    my( $res, $zone, $rr ) = @_;
+
+    my $upd = Net::DNS::Update->new( $zone, $rr->class );
+    $upd->push( prereq =>
+                yxrrset( sprintf( '%s. 0 %s %s', $rr->owner, $rr->class, $rr->type ) ) );
+    $upd->push( update => rr_del( $rr->string ) );
+
+    if( $debug ) {
+        printf( "    Removing\n" );
+        my $s = $upd->string;
+        print( indent( 4, $upd->string ) );
+    }
+    my $r = $res->send( $upd );
+    if( $r && $r->header->rcode eq 'NOERROR' ) {
+        ++$removed;
+        printf( "    Removed\n" );
+    } else {
+        if( $r ) {
+            $sts |= 4;
+            printf( "    Remove failed: %s from %s\n", $r->header->rcode, $r->from );
+        } else {
+            $sts |= 8;
+            printf( "    Update failed: %s from %s\n", $res->errorstring, $r->from );
+        }
+        print( indent( 4, $upd->string, $r->string ) ) unless( $debug );
+    }
+    return;
+}
+
+# Indent a string
+
+sub indent {
+    my $n = shift;
+    my $s = join( '', @_ );
+    my $i = ' ' x $n;
+    $s =~ s/^/$i/gms;
+    return $s;
+}
+
+# Remove the traceback information from an exception message
+
+sub cleandiemsg {
+    my( $msg ) = @_;
+
+    $msg =~ s/\A(.*?) at .*\Q$self\E line \d+\.\Z/$1/s unless( $debug );
+    chomp $msg;
+    return $msg;
+}
+
+__END__
+
+=head1 ACME_TOKEN_CHECK
+
+acme_token_check - check DNS domain(s) for stray ACME tokens
+
+=head1 SYNOPSIS
+
+acme_token_check [options] [domain ...]
+
+  Options
+    --debug           --library   --nameservers  --recurse  --remove
+    --source-address  --tsig-key  --unsigned     --verbose  --view
+    --help            --man       --version
+
+If no domain is specified, all domains in F<%TL::Netconfig::domains> are checked,
+except for any in F<.arpa> or F<localhost>.
+
+=head1 OPTIONS
+
+=over 8
+
+=item B<-d> B<--[no]debug>
+
+Display debugging output from DNS queries.
+
+=item B<--library>=I<path>
+
+Library path for PerlLib modules.
+
+=item B<--nameservers>-I<addr,...>
+
+Name(s) and/or Address(es) of nameservers to use.
+
+=item B<--[no]recurse>
+
+Process delegations (subzones) of the specified domains.  Default is B<--recurse>,
+
+=item B<-r> B<--[no]remove>
+
+Remove all records found.  Default is B<--noremove>.
+
+=item B<-s> B<--source-address>=I<address>
+
+Send queries from I<address>.  Default is any local address.
+
+=item B<-k> B<--tsig-key>=I<file>
+
+Specify a file containing TSIG key to use for the domain(s).
+
+Default is to use the 'external' key specified in F<TL::NetConfig>.
+
+=item B<-u> B<--unsigned>
+
+Do not sign queries or updates with TSIG.
+
+=item B<-V> B<--view>=I<name>
+
+Specify view to be used if B<--tsig-ky> is defaulted.
+
+=item B<-v> B<--[no]verbose>
+
+Report all findings/actions.
+
+Default is to report totals if any records are found, and to report errors.
+
+=item B<--help>
+
+Print a brief help message and exit.
+
+=item B<--man>
+
+Print the manual page and exit.
+
+=back
+
+=head1 DESCRIPTION
+
+B<acme_token_check> scans the specified domain(s) and any subdomains for B<TXT> records
+of the form:
+
+    _acme-challenge.*
+
+With B<--verbose> tnose found will be reported.
+
+With B<--remove>, those found will be removed from the DNS.
+
+These records are created when the ACME protocol is used to obtain TLS certificates.,
+validating domain ownership with its I<DNS-01> option.
+
+They should be removed, but system or software failures can leave them in the DNS.
+
+B<acme_token_check> performs a zone transfer (AXFR) in order to locate the
+text records.  If requested, it uses DNS UPDATE to remove them.  The nameserver
+must be configured to permit these transactions.
+
+When run at a time that no renewals are active, B<acme_token_check> provides a means
+to detect and remove leftover challenge records.  By default, it only generates output
+if records are found or errors are encountered, making it suitable for a I<cron> job.
+Such I<cron> jobs should be scheduled when they will not interfere with certificate
+renewals.
+
+Communications with the nameserver are signed with TSIG unless B<--unsigned> is
+specified.  B<--unsigned> communications are adequate when TSIG is not used for
+view selection, zone transfer authentication, or update authentication.
+
+If TSIG is not used, the nameserver is presumed to handle any view selection,
+and authentication based on IP address.  In this case, if the host running
+B<acme_token_check> is multi-homed, B<--source-address> can be used to ensure
+that transactions use an authorized address to communicate with the DNS servers.
+
+B<PerlLib> is a non-public library.  It is not required if a domain, B<--nameserver>
+and B<--tsig-key> (or B<--unsigned>) are specified.  Otherwise, B<acme_token_check> will
+try to load modules from PerlLib to obtain defaults for these options.
+
+=head1 RETURN VALUE
+
+The exit code provides summary status.  Values are ORed if more than one applies.
+
+=over 4
+
+=item 0 Success
+
+=item 1 A zone transfer failed.
+
+=item 2 A challenge token record was found.
+
+=item 4 A DNS server refused to delete a challenge token record.
+
+=item 8 A DNS server did not return a reply to a delete request.
+
+=item 255 Error in command or unhandled error from a module.
+
+=back
+
+=head1 BUGS
+
+Report any bugs, feature requests and/or patches on the issue tracker,
+located at F<https://github.com/tlhackque/certtools/issues>.  In the
+event that the project moves, contact the author directly.
+
+I<Net::DNS> prevents efficient connection reuse when B<--recurse> is
+used.  See L<RT#145835|https://rt.cpan.org/Ticket/Display.html?id=145835>
+Work-around adjusts timing at the cost of some memory.
+
+
+=head1 AUTHOR
+
+Timothe Litt  E<lt>litt@acm.orgE<gt>
+
+=head1 COPYRIGHT and LICENSE
+
+Copyright (c) 2023 Timothe Litt
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+Except as contained in this notice, the name of the author shall not be
+used in advertising or otherwise to promote the sale, use or other dealings
+in this Software without prior written authorization from the author.
+
+Any modifications to this software must be clearly documented by and
+attributed to their author, who is responsible for their effects.
+
+Bug reports, suggestions and patches are welcomed by the original author.
+
+=head1 SEE ALSO
+
+I<mod_md> I<getssl> I<uacme> I<RFC8555> ...
+
+=cut
