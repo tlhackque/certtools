@@ -7,5 +7,6 @@ makereadme   export-ignore
 Makefile     export-ignore
 
 # Used only for GitHub
-ssl_check_chain.md export-ignore
-ssl_status.md      export-ignore
+acme_token_check.md  export-ignore
+ssl_check_chain.md   export-ignore
+ssl_status.md        export-ignore
