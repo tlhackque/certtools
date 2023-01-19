@@ -15,7 +15,7 @@ our $VERSION = '$Id$';
 # Some ideas from ssl-cert-check by matty91
 
 use Config( qw/%Config/ );
-use Cwd( qw/realpath/ );
+use Cwd(    qw/realpath/ );
 use Date::Parse;
 use Errno( qw/EAGAIN/ );
 use Fcntl( qw/:seek/ );
@@ -23,6 +23,7 @@ use File::Basename;
 use File::Spec;
 use File::Temp;
 use Getopt::Long( qw/GetOptionsFromString :config bundling/ );
+use IO::Socket::IP;
 use POSIX( qw/mktime strftime/ );
 use Sys::Hostname;
 use Text::Abbrev;
@@ -118,11 +119,11 @@ my @columns = (
                pdelta( $cert->{end} + ( $cert->{renewbefore} * $day ), $now, 2 );
                if( $d2g == 1 ) {
                    return 'TOMORROW';
-           } elsif( $d2g == 0 ) {
+               } elsif( $d2g == 0 ) {
                    return 'TODAY';
-           } elsif( $d2g < 0 ) {
+               } elsif( $d2g < 0 ) {
                    return sprintf( "%5ud LATE", -$d2g > 99999 ? 99999 : -$d2g );
-           } else {
+               } else {
                    return date( $cert, 'end', $cert->{renewbefore} );
                }
            },
@@ -188,9 +189,9 @@ sub days {
 }
 
 # Option values
-my(   @contents,     $debug,     $email_from,    @email_to,      $warn, $inifile,
-      @smtp_servers, $smtp_user, $smtp_password, $smtp_ssl_mode, $logo, $brief,
-      $help,         $man,       $version, );
+my( @contents,     $debug,     $email_from,    @email_to,      $warn, $inifile,
+    @smtp_servers, $smtp_user, $smtp_password, $smtp_ssl_mode, $logo, $brief,
+    $help,         $man,       $version, );
 
 # Execute command & print unexpected errors
 
@@ -203,9 +204,10 @@ sub docmd {
         if( $? == -1 ) {
             printf STDERR ( "failed to execute %s: $!\n", $cmd );
         } elsif( $? & 127 ) {
-            printf STDERR ( "%s died with signal %s (%d), %s coredump\n", $cmd,
-                            ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                            ( $? & 128 ) ? 'with' : 'without' );
+            printf STDERR (
+                    "%s died with signal %s (%d), %s coredump\n", $cmd,
+                    ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                    ( $? & 128 ) ? 'with' : 'without' );
         } elsif( $_[1] ne 'verify' ) {
             printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
@@ -287,8 +289,9 @@ sub readfile {
 
     $name = tildename( $name, $at, $atl );
     unless( defined $name ) {
-        printf STDERR ( "Skipping unresolvable filename %s, specified %s\n", $_[0],
-                        atloc( $at, $atl ) )
+        printf STDERR (
+                "Skipping unresolvable filename %s, specified %s\n", $_[0],
+                atloc( $at, $atl ) )
             if( $warn );
         return;
     }
@@ -309,8 +312,9 @@ sub readfile {
         }
         close( $fh );
         unless( $chain =~ /^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE/m ) {
-            printf STDERR ( "Skipping %s, specified %s: No certificates found\n", $name,
-                            atloc( $at, $atl ) );
+            printf STDERR (
+                    "Skipping %s, specified %s: No certificates found\n", $name,
+                    atloc( $at, $atl ) );
             return;
         }
         ( my $haskey ) = $chain =~ /^-{2,8}BEGIN (RSA|EC) PRIVATE KEY/m;
@@ -329,8 +333,8 @@ sub atfile {
         unless( defined $fn );
     if( $atfiles{$fn} ) {
         printf STDERR (
-                      "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
-                      $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
+                "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
+                $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
             if( $warn );
         $atfiles{$fn} = atloc( $at, $atl );
         return;
@@ -414,8 +418,9 @@ sub analyzeChain {
         $cert{$i}{host}        = $host->[0];
         $cert{$i}{port}        = $host->[1];
         $cert{$i}{renewbefore} = $opts->{renewbefore};
-        my $state = docmd( "openssl ",                              "x509",
-                           " -nameopt multiline -noout -text -in ", "$file\n" );
+        my $state = docmd(
+                "openssl ",                              "x509",
+                " -nameopt multiline -noout -text -in ", "$file\n" );
 
         if( my( $spc, $issuer ) = $state =~ /^(\s*)Issuer:\n(.*?)^\1[[:alpha:]]/ms ) {
             $cert{$i}{issuer} = $issuer;
@@ -464,13 +469,14 @@ sub analyzeChain {
 
     for( my $i = 0; $i < @chain; ++$i ) {
         my $state = docmd(
-                   "openssl ", "verify", " $opts->{CAcerts} $untrusted ", $cert{$i}{file},
-                   " 2>&1\n" );
+                "openssl ", "verify", " $opts->{CAcerts} $untrusted ", $cert{$i}{file},
+                " 2>&1\n" );
         chomp $state;
 
         if( my( $subj, $err, $depth, $text ) =
-              $state =~
-              /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m ) {
+            $state =~
+            /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m )
+        {
             if( $subj eq $cert{$i}{issuer_c} ) {
                 $state = "Verify issuer \@depth $depth failed ($text)";
             } else {
@@ -532,9 +538,8 @@ sub checkhost {
                 ( $chain, $haskey ) = readfile( $name, $at, $atl );
                 return unless( $chain );
             } else {
-                dief(
-"\"%s\" is not a known port name for %s, specified %s, see /etc/services\n",
-                       $pn, $name, atloc( $at, $atl ) );
+                dief(  "\"%s\" is not a known port name for %s, specified %s, see /etc/services\n",
+                      $pn, $name, atloc( $at, $atl ) );
             }
         }
     } elsif( $opts->{starttls} && ( $port = $opts->{starttls}[1] ) ) {
@@ -545,8 +550,9 @@ sub checkhost {
     }
     if( $port ne 'FILE' ) {
         if( ( my $prev = $hosts{$host} ) ) {
-            printf STDERR ("Skipping duplicate host \"%s\" %s, previously specified %s\n",
-                           $host, atloc( $at, $atl ), $prev )
+            printf STDERR (
+                    "Skipping duplicate host \"%s\" %s, previously specified %s\n",
+                    $host, atloc( $at, $atl ), $prev )
                 if( $warn );
             $hosts{$host} = atloc( $at, $atl );
             return;
@@ -564,15 +570,14 @@ sub checkhost {
         printf STDERR ( ">> %s\n", $cmd ) if( $debug );
         my( $cpid, $waitpid );
         eval {
-                my( $saveout, $saveerr );
-                open( $saveout, ">&STDOUT" );
-                open( $saveerr, ">&STDERR" );
-                $chain = File::Temp->new(
-                                        DIR    => $tmpdir, TEMPLATE => "sslstatus-XXXXXX",
+            my( $saveout, $saveerr );
+            open( $saveout, ">&STDOUT" );
+            open( $saveerr, ">&STDERR" );
+            $chain = File::Temp->new(   DIR    => $tmpdir, TEMPLATE => "sslstatus-XXXXXX",
                                         SUFFIX => '.txt',  UNLINK   => 1 );
-                open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
-                open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
-                local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
+            open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
+            open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
+            local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
 #<<<
             FORK: {
                     if( $cpid = fork ) {
@@ -595,9 +600,9 @@ sub checkhost {
                     }
                 }
 #>>>
-                alarm( $opts->{timeout} );
-                ( $waitpid = waitpid( $cpid, 0 ) ) == $cpid or die( "waitpid: $!\n" );
-                alarm( 0 );
+            alarm( $opts->{timeout} );
+            ( $waitpid = waitpid( $cpid, 0 ) ) == $cpid or die( "waitpid: $!\n" );
+            alarm( 0 );
         };
         alarm( 0 );
         waitpid( $cpid, 0 ) if( $cpid && !$waitpid );
@@ -621,9 +626,10 @@ sub checkhost {
                     if( $? == -1 ) {
                         printf STDERR ( "failed to execute %s: $!\n", $cmd );
                     } elsif( $? & 127 ) {
-                        printf STDERR ("%s died with signal %s (%d), %s coredump\n", $cmd,
-                                       ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                                       ( $? & 128 ) ? 'with' : 'without' );
+                        printf STDERR (
+                                "%s died with signal %s (%d), %s coredump\n", $cmd,
+                                ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                                ( $? & 128 ) ? 'with' : 'without' );
                     } else {
                         printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
                     }
@@ -665,17 +671,20 @@ sub genTextReport {
     $width = length( $name ) if( length( $name ) > $width );
 
     my $pad = ' ' x ( int( ( $width - length $name ) / 2 ) );
-    printf $out ( "%s%s\n%s%s\n\n", $pad, ucfirst( $name ), $pad,
-                  '-' x length( $name ) );
+    printf $out (
+            "%s%s\n%s%s\n\n", $pad, ucfirst( $name ), $pad,
+            '-' x length( $name ) );
 
     foreach my $col ( @$columns ) {
         $col->{width} = length $col->{name} if( length $col->{name} > $col->{width} );
-        printf $out ( "%-*s%s", $col->{width}, $col->{name},
-                      ( $col->{last} ? "\n" : ' ' ) );
+        printf $out (
+                "%-*s%s", $col->{width}, $col->{name},
+                ( $col->{last} ? "\n" : ' ' ) );
     }
     foreach my $col ( @$columns ) {
-        printf $out ( "%-*s%s", $col->{width}, '-' x $col->{width},
-                      ( $col->{last} ? "\n" : ' ' ) );
+        printf $out (
+                "%-*s%s", $col->{width}, '-' x $col->{width},
+                ( $col->{last} ? "\n" : ' ' ) );
     }
 
     my $phost;
@@ -785,10 +794,11 @@ sub genHTML {
             '<!DOCTYPE html>',
             '<head>',
             '<meta charset="iso-8859-1">',
-            sprintf( "<meta name=\"generator\" content=\"%s %s\">", $prog,
-                     formatVersion( $VERSION ) ),
+            sprintf(
+                "<meta name=\"generator\" content=\"%s %s\">", $prog,
+                formatVersion( $VERSION ) ),
             '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-               );
+    );
     push @tags, "<title>$title</title>"    if( $title );
     push @tags, "<style>$nl$style</style>" if( $style );
     push @tags, '</head>', '<body>';
@@ -811,8 +821,9 @@ Content-Type: multipart/alternative;
     boundary="$boundary[0]"
 MIME-Version: 1.0
 MIMEHDR
-        $body .= join( '',
-                       << "PART", encode_qp( ref $text ? $$text : $text ) );
+        $body .= join(
+                '',
+                << "PART", encode_qp( ref $text ? $$text : $text ) );
 This is a multi-part message in MIME format.
 
 --$boundary[0]
@@ -900,8 +911,8 @@ sub sendmsg {
     my( $msg ) = @_;
 
     eval { require Net::SMTP; } or do {
-            print STDERR ( $@ );
-            return;
+        print STDERR ( $@ );
+        return;
     };
     die( "TLS required for e-mail, but is not available\n" )
         if( $smtp_ssl_mode ne 'no' && !Net::SMTP->can_ssl );
@@ -914,8 +925,8 @@ sub sendmsg {
             my $usessl = $smtp_ssl_mode eq 'yes';
             unless( $usessl || $smtp_ssl_mode eq 'starttls' ) {
                 eval {
-                        my( $h, $p ) = IO::Socket::IP->split_addr( $addr );
-                        $usessl = 1
+                    my( $h, $p ) = IO::Socket::IP->split_addr( $addr );
+                    $usessl = 1
                         if( defined $p && ( $p eq '465' || lc $p eq 'smtps' ) );
                 };
             }
@@ -932,26 +943,26 @@ sub sendmsg {
             };
         if( $debug ) {
             my $host = eval {
-                    sprintf(
-                          "%s (%s)", IO::Socket::IP->join_addr( $smtp->peerhost_service ),
-                          IO::Socket::IP->join_addr( $smtp->peerhost_service( 1 ) ) );
-                }
+                sprintf("%s (%s)", IO::Socket::IP->join_addr( $smtp->peerhost_service ),
+                             IO::Socket::IP->join_addr( $smtp->peerhost_service( 1 ) ) );
+            }
                 || $smtp->host;
             $smtp->debug_print( 0, sprintf( "Connected to %s\n", $host ) );
         }
-        if(   $smtp_ssl_mode eq 'starttls'
-              || (    $smtp_ssl_mode ne 'no'
-                   && Net::SMTP->can_ssl
-                   && defined $smtp->supports( 'STARTTLS' ) )
+        if( $smtp_ssl_mode eq 'starttls'
+            || (        $smtp_ssl_mode ne 'no'
+                     && Net::SMTP->can_ssl
+                     && defined $smtp->supports( 'STARTTLS' ) )
             ) {
             unless( defined $smtp->supports( 'STARTTLS' ) ) {
-                printf STDERR ( "STARTTLS attempted, but is not supported by %s\n",
-                                $smtp->host );
+                printf STDERR (
+                        "STARTTLS attempted, but is not supported by %s\n",
+                        $smtp->host );
                 next;
             }
             $smtp->starttls( @ssl[ 0 .. -2 ] ) or do {
-                    smtpfail( $smtp, 'STARTTLS to SMTP server' );
-                    next;
+                smtpfail( $smtp, 'STARTTLS to SMTP server' );
+                next;
             };
         }
         last;
@@ -1008,11 +1019,12 @@ sub sendmsg {
     $smtp->mail( $msg->{BareFrom} ) or
         return smtpfail( $smtp, "MAIL FROM: $msg->{BareFrom}" );
     $smtp->recipient( ref $msg->{To} ? @{ $msg->{To} } : $msg->{To} ) or do {
-            print STDERR ( "Recipient list not accepted\n" );
-            return;
+        print STDERR ( "Recipient list not accepted\n" );
+        return;
     };
-    $headers .= sprintf( "To: %s\n",
-                         join( ',', ref( $msg->{To} ) ? @{ $msg->{To} } : $msg->{To} ) );
+    $headers .= sprintf(
+            "To: %s\n",
+            join( ',', ref( $msg->{To} ) ? @{ $msg->{To} } : $msg->{To} ) );
     my $xm = sprintf( "X-Mailer: %s %s via", $prog, formatVersion( $VERSION ) );
     $headers .= $xm . modver( ref $smtp, length $xm ) . "\n";
     $headers .= sprintf( "Subject: %s\n", $msg->{Subject} ) if( $msg->{Subject} );
@@ -1046,8 +1058,8 @@ sub smtpfail {
     for( my $i = 0; 1; ++$i ) {
         last if( $i >= @ARGV || $ARGV[$i] eq '--' );
         if(
-              (  my( $no, $file ) =
-                 $ARGV[$i] =~ /^--(no-?)?ini(?:t(?:i(?:a(?:l(?:i(?:z(?:a(?:t
+            (      my( $no, $file ) =
+                   $ARGV[$i] =~ /^--(no-?)?ini(?:t(?:i(?:a(?:l(?:i(?:z(?:a(?:t
                             (?:i(?:o(?:n)?(?:-(?:f(?:i(?:l(?:e)?)?)?)?)?)?
                             )?)?)?)?)?)?)?)?)?(?:=(\S+))?$/ix )
             ) {
@@ -1073,7 +1085,7 @@ sub smtpfail {
                     [  File::Spec->catpath( @ENV{qw/HOMEDRIVE HOMEPATH/} ) =>
                        qq(.${prog}.ini) ],
                     [ $ENV{SSLSTATUS} => qq(${prog}.ini) ],
-                    );
+            );
         } elsif( $ostype eq 'VMS' ) {
             @locs = ( [ $ENV{DEFAULT}      => qq(${prog}.ini) ],
                       [ $ENV{'SYS$LOGIN'}  => qq(${prog}.ini) ],
@@ -1114,18 +1126,19 @@ sub smtpfail {
 {
     my( $cafile, $cadir, $renews, $starttls, $timeout, $tlsver, @certtype );
 
-    @hostoptions = ( "CAfile=s"                            => \$cafile,
-                     "no-CAfile|noCAfile"                  => sub { $cafile = '' },
-                     "CApath|CAdir=s"                      => \$cadir,
-                     "no-CApath|noCApath|no-CAdir|noCAdir" => sub { $cadir = '' },
-                     "renewbefore=i"                       => \$renews,
-                     "starttls=s"                          => \$starttls,
-                     "no-starttls|nostarttls"              => sub { undef $starttls },
-                     "tlsversion=s"                        => \$tlsver,
-                     "no-tlsversion|notlsversion"          => sub { undef $tlsver },
-                     "timeout=i"                           => \$timeout,
-                     "type=s"                              => \@certtype,
-                     "no-type|notype"                      => sub { @certtype = () },
+    @hostoptions = (
+            "CAfile=s"                            => \$cafile,
+            "no-CAfile|noCAfile"                  => sub { $cafile = '' },
+            "CApath|CAdir=s"                      => \$cadir,
+            "no-CApath|noCApath|no-CAdir|noCAdir" => sub { $cadir = '' },
+            "renewbefore=i"                       => \$renews,
+            "starttls=s"                          => \$starttls,
+            "no-starttls|nostarttls"              => sub { undef $starttls },
+            "tlsversion=s"                        => \$tlsver,
+            "no-tlsversion|notlsversion"          => sub { undef $tlsver },
+            "timeout=i"                           => \$timeout,
+            "type=s"                              => \@certtype,
+            "no-type|notype"                      => sub { @certtype = () },
                    );
 
     # Option values => OpenSSL options
@@ -1195,8 +1208,8 @@ sub smtpfail {
                 $name = 'ec' if( $name eq 'ecdsa' );
                 if( $seen{$name} ) {
                     printf STDERR (
-                                  "Skipped duplicate certificate type %s, specified %s\n",
-                                  $type, atloc( $at, $atl ) )
+                            "Skipped duplicate certificate type %s, specified %s\n",
+                            $type, atloc( $at, $atl ) )
                         if( $warn );
                     next;
                 }
@@ -1210,9 +1223,8 @@ sub smtpfail {
                         $havepss = $pkalgs =~ /^\s*PEM\sstring:\s*RSA-PSS\b/m;
                     }
                     if( $vals{tlsversion}[0] && $vals{tlsversion}[0] =~ /1_[3-9]$/ ) {
-                        dief(
-"TLS 1.3 doesn't support '%s' certificates, specified %s\n",
-                               $type, atloc( $at, $atl ) );
+                        dief(  "TLS 1.3 doesn't support '%s' certificates, specified %s\n",
+                              $type, atloc( $at, $atl ) );
                     }
                     $cs =
                         $havepss
@@ -1277,40 +1289,42 @@ sub smtpfail {
 
         return \%vals;
     }
-    @globaloptions = ( "debug|d!"                   => \$debug,
-                       "brief!"                     => \$brief,
-                       "email-from|e-mail-from=s"   => \$email_from,
-                       "no-email-from|noemail-from" => sub { undef $email_from },
-                       "email-to|e-mail-to=s"       => \@email_to,
-                       "no-email|noemail"           => sub { @email_to = (); },
-                       "format=s"                   => \$format,
-                       "logo=s"                     => \$logo,
-                       "no-logo|nologo"             => sub { $logo = '' },
-                       "pretend-its=i"              => sub { $now += $_[1] * $day },
-                       "select=s"                   => \@contents,
-                       "smtp-server=s"              => \@smtp_servers,
-                       "smtp-username=s"            => \$smtp_user,
-                       "smtp-password=s"            => \$smtp_password,
-                       'smtp-ssl-mode=s'            => \$smtp_ssl_mode,
-                       "stylesheet=s"               => \$stylesheet,
-                       "warnings!"                  => \$warn,
-                       'help|?|h'                   => \$help,
-                       'man'                        => \$man,
-                       'version'                    => \$version,
+    @globaloptions = (
+            "debug|d!"                   => \$debug,
+            "brief!"                     => \$brief,
+            "email-from|e-mail-from=s"   => \$email_from,
+            "no-email-from|noemail-from" => sub { undef $email_from },
+            "email-to|e-mail-to=s"       => \@email_to,
+            "no-email|noemail"           => sub { @email_to = (); },
+            "format=s"                   => \$format,
+            "logo=s"                     => \$logo,
+            "no-logo|nologo"             => sub { $logo = '' },
+            "pretend-its=i"              => sub { $now += $_[1] * $day },
+            "select=s"                   => \@contents,
+            "smtp-server=s"              => \@smtp_servers,
+            "smtp-username=s"            => \$smtp_user,
+            "smtp-password=s"            => \$smtp_password,
+            'smtp-ssl-mode=s'            => \$smtp_ssl_mode,
+            "stylesheet=s"               => \$stylesheet,
+            "warnings!"                  => \$warn,
+            'help|?|h'                   => \$help,
+            'man'                        => \$man,
+            'version'                    => \$version,
                      );
 }
 GetOptions( @globaloptions, @hostoptions ) or
-    dief( "Command line error, --help for usage\n%s",
-          $inifile ? "Check $inifile for possible errors\n" : "" );
+    dief(
+        "Command line error, --help for usage\n%s",
+        $inifile ? "Check $inifile for possible errors\n" : "" );
 printf STDERR ( "Read initial options from %s\n", $inifile )
     if( $debug && $inifile );
 
 if( $help || $man ) {
     eval {
-            no warnings 'once';
-            $Pod::Usage::Formatter = 'Pod::Text::Termcap';
-            require Pod::Usage;
-        } or
+        no warnings 'once';
+        $Pod::Usage::Formatter = 'Pod::Text::Termcap';
+        require Pod::Usage;
+    } or
         die( "Install Pod::Usage or use 'perldoc $prog'\n" );
 
     Pod::Usage::pod2usage( 1 )                            if( $help );
@@ -1652,6 +1666,8 @@ uVx2frLeCThzo1U5B2OHuD6t8rKseiALK+N3TVJN4Ff0P3D/+vGlfUfQOvebqifWeYfchkskkcNT
 /wjeoOr1BG8RXOchY++2Tayoau/hf77UeL2rd+iGAkfbh3fBacNg43k78HrhblTDvdxg914wHi8i
 eu+/A4q45TZdjLhnxL2E8btH3oWMdHR0vFX/5/+W6p3WoNAKFQAAAABJRU5ErkJggg==
 __END__
+
+=pod
 
 =head1 SSL_STATUS
 

@@ -13,7 +13,7 @@ our $VERSION = '$Id$';
 # License is in the POD at the end of this file.
 
 use Config( qw/%Config/ );
-use Cwd( qw/realpath/ );
+use Cwd(    qw/realpath/ );
 use Date::Parse;
 use Errno( qw/EAGAIN/ );
 use Fcntl( qw/:seek/ );
@@ -21,7 +21,7 @@ use File::Basename;
 use File::Spec;
 use File::Temp;
 use Getopt::Long( qw/:config bundling/ );
-use POSIX( qw/strftime/ );
+use POSIX(        qw/strftime/ );
 use Text::Abbrev;
 
 my @signo;
@@ -66,8 +66,9 @@ my( %atfiles, %hosts );
 my %tlsver = ( '1.1' => '-tls1_1', '1.2' => '-tls1_2', '1.3' => '-tls1_3', );
 
 # Option values
-my(   $cafile, $cadir, $debug, $warn, $help, $man, $version, $starttls, $timeout, $tlsver,
-      $type );
+my( $cafile, $cadir, $debug, $warn, $help, $man, $version, $starttls, $timeout,
+    $tlsver,
+    $type );
 
 # Execute command & print unexpected errors
 
@@ -80,9 +81,10 @@ sub docmd {
         if( $? == -1 ) {
             printf STDERR ( "failed to execute %s: $!\n", $cmd );
         } elsif( $? & 127 ) {
-            printf STDERR ( "%s died with signal %s (%d), %s coredump\n", $cmd,
-                            ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                            ( $? & 128 ) ? 'with' : 'without' );
+            printf STDERR (
+                    "%s died with signal %s (%d), %s coredump\n", $cmd,
+                    ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                    ( $? & 128 ) ? 'with' : 'without' );
         } elsif( $_[1] ne 'verify' ) {
             printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
@@ -138,9 +140,9 @@ sub tildename {
             my $user = length $1 ? $1 : getlogin();
             my $dir  = ( getpwnam( $user ) )[7];
             die(  sprintf(
-                        "~%s/%s: %s has no home directory, specified %s\n", $1, $filename,
-                        $user,
-                        atloc( $at, $atl ) ) )
+                      "~%s/%s: %s has no home directory, specified %s\n", $1, $filename,
+                      $user,
+                      atloc( $at, $atl ) ) )
                 unless( $dir );
             $filename = File::Spec->catfile( $dir, $filename );
         }
@@ -156,8 +158,9 @@ sub readfile {
     $$header = 1;
     $name    = tildename( $name, $at, $atl );
     unless( defined $name ) {
-        printf STDERR ( "Skipping unresolvable filename %s, specified %s\n", $_[0],
-                        atloc( $at, $atl ) )
+        printf STDERR (
+                "Skipping unresolvable filename %s, specified %s\n", $_[0],
+                atloc( $at, $atl ) )
             if( $warn );
         return;
     }
@@ -178,8 +181,9 @@ sub readfile {
         }
         close( $fh );
         unless( $chain =~ /^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE/m ) {
-            die(  sprintf( "No certificates found in %s, specified %s\n", $name,
-                           atloc( $at, $atl ) ) );
+            die(  sprintf(
+                      "No certificates found in %s, specified %s\n", $name,
+                      atloc( $at, $atl ) ) );
         }
         ( my $haskey ) = $chain =~ /^-{2,8}BEGIN (RSA|EC) PRIVATE KEY/m;
         return ( $chain, $haskey );
@@ -193,13 +197,13 @@ sub atfile {
     my( $host, $fn, $header, $first, $at, $atl ) = @_;
 
     $fn = tildename( $fn, $at, $atl );
-    die(  sprintf( "Unresolvable \@filename %s, specified %s\n", $_[1], atloc( $at, $atl )
+    die(  sprintf("Unresolvable \@filename %s, specified %s\n", $_[1], atloc( $at, $atl )
                  ) )
         unless( defined $fn );
     if( $atfiles{$fn} ) {
         printf STDERR (
-                      "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
-                      $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
+                "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
+                $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
             if( $warn );
         $atfiles{$fn} = atloc( $at, $atl );
         return;
@@ -279,15 +283,14 @@ sub checkhost {
         printf STDERR ( ">> %s\n", $cmd ) if( $debug );
         my( $cpid, $waitpid );
         eval {
-                my( $saveout, $saveerr );
-                open( $saveout, ">&STDOUT" );
-                open( $saveerr, ">&STDERR" );
-                $chain = File::Temp->new(
-                                       DIR    => $tmpdir, TEMPLATE => "checkchain-XXXXXX",
+            my( $saveout, $saveerr );
+            open( $saveout, ">&STDOUT" );
+            open( $saveerr, ">&STDERR" );
+            $chain = File::Temp->new(  DIR    => $tmpdir, TEMPLATE => "checkchain-XXXXXX",
                                        SUFFIX => '.txt',  UNLINK   => 1 );
-                open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
-                open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
-                local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
+            open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
+            open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
+            local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
 #<<<
             FORK:{
                     if( $cpid = fork ) {
@@ -310,9 +313,9 @@ sub checkhost {
                     }
                 }
 #>>>
-                alarm( $timeout );
-                ( $waitpid = waitpid( $cpid, 0 ) ) == $cpid or die( "waitpid: $!\n" );
-                alarm( 0 );
+            alarm( $timeout );
+            ( $waitpid = waitpid( $cpid, 0 ) ) == $cpid or die( "waitpid: $!\n" );
+            alarm( 0 );
         };
         alarm( 0 );
         waitpid( $cpid, 0 ) if( $cpid && !$waitpid );
@@ -337,9 +340,10 @@ sub checkhost {
                     if( $? == -1 ) {
                         printf STDERR ( "failed to execute %s: $!\n", $cmd );
                     } elsif( $? & 127 ) {
-                        printf STDERR ("%s died with signal %s (%d), %s coredump\n", $cmd,
-                                       ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                                       ( $? & 128 ) ? 'with' : 'without' );
+                        printf STDERR (
+                                "%s died with signal %s (%d), %s coredump\n", $cmd,
+                                ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                                ( $? & 128 ) ? 'with' : 'without' );
                     } else {
                         printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
                     }
@@ -364,8 +368,9 @@ sub checkhost {
             $cert{$i}{file} = $file;
             print $file ( $chain[$i] );
             $file->flush;
-            my $state = docmd( "openssl ",           "x509",
-                               " -noout -text -in ", "$file\n" );
+            my $state = docmd(
+                    "openssl ",           "x509",
+                    " -noout -text -in ", "$file\n" );
             $cert{$i}{subject} = $1 if( $state =~ /^\s*Subject:\s*(.*?)$/m );
             $cert{$i}{issuer}  = $1 if( $state =~ /^\s*Issuer:\s*(.*?)$/m );
             $cert{$i}{start}   = str2time( $1, 'GMT' )
@@ -386,34 +391,38 @@ sub checkhost {
             $text .= sprintf( "Contains private %s key\n\n", $haskey )
                 if( $i == 0 && $haskey );
             $text .= sprintf(
-                            "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
-                            $cert{$i}{issuer} );
+                    "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
+                    $cert{$i}{issuer} );
             $text .= sprintf( "    Type   : %s %s\n", $cert{$i}{key}, $cert{$i}{klen} );
             if( $now < $cert{$i}{start} || $now > $cert{$i}{end} ) {
                 $text .= "    Certificate is NOT valid at this time\n";
             }
             if( $now < $cert{$i}{start} ) {
-                $text .= sprintf( "    Certificate is not yet valid, will be %s\n",
-                                  pdelta( $cert{$i}{start}, $now ) );
+                $text .= sprintf(
+                        "    Certificate is not yet valid, will be %s\n",
+                        pdelta( $cert{$i}{start}, $now ) );
             } else {
-                $text .= sprintf( "    Certificate became valid %s\n",
-                                  pdelta( $cert{$i}{start}, $now ) );
+                $text .= sprintf(
+                        "    Certificate became valid %s\n",
+                        pdelta( $cert{$i}{start}, $now ) );
             }
             if( $now > $cert{$i}{end} ) {
-                $text .= sprintf( "    Certificate expired %s\n",
-                                  pdelta( $cert{$i}{end}, $now ) );
+                $text .= sprintf(
+                        "    Certificate expired %s\n",
+                        pdelta( $cert{$i}{end}, $now ) );
             } else {
-                $text .= sprintf( "    Certificate expires %s\n",
-                                  pdelta( $cert{$i}{end}, $now ) );
+                $text .= sprintf(
+                        "    Certificate expires %s\n",
+                        pdelta( $cert{$i}{end}, $now ) );
             }
 
             my $state = docmd(
-                           "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
-                           " 2>&1\n" );
+                    "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
+                    " 2>&1\n" );
             chomp $state;
 
             if( my( $subj, $err, $depth, $text ) =
-                  $state =~
+                $state =~
                 /\A(.*?)\nerror ([[:digit:]]+) at ([[:digit:]]+) depth lookup: (.*?)$/m )
             {
                 if( $subj eq $cert{$i}{issuer} ) {
@@ -447,31 +456,32 @@ sub checkhost {
 
 # Main program - Process command line options
 
-GetOptions( "CAfile|C=s"     => \$cafile,
-            "CApath|CAdir=s" => \$cadir,
-            "debug|d!"       => \$debug,
-            "starttls|s=s"   => \$starttls,
-            "timeout=i"      => \$timeout,
-            "tlsversion|t=s" => \$tlsver,
-            "type|c=s"       => \$type,
-            "warnings!"      => \$warn,
-            'help|?|h'       => \$help,
-            'man'            => \$man,
-            'version'        => \$version,
+GetOptions(
+        "CAfile|C=s"     => \$cafile,
+        "CApath|CAdir=s" => \$cadir,
+        "debug|d!"       => \$debug,
+        "starttls|s=s"   => \$starttls,
+        "timeout=i"      => \$timeout,
+        "tlsversion|t=s" => \$tlsver,
+        "type|c=s"       => \$type,
+        "warnings!"      => \$warn,
+        'help|?|h'       => \$help,
+        'man'            => \$man,
+        'version'        => \$version,
           ) or die( "Command line error, --help for usage\n" );
 if( $help || $man ) {
     eval {
-            no warnings 'once';
-            $Pod::Usage::Formatter = 'Pod::Text::Termcap';
-            require Pod::Usage;
-        } or
+        no warnings 'once';
+        $Pod::Usage::Formatter = 'Pod::Text::Termcap';
+        require Pod::Usage;
+    } or
         die( "Install Pod::Usage or use 'perldoc $0'\n" );
 
     Pod::Usage::pod2usage( 1 )                            if( $help );
     Pod::Usage::pod2usage( -exitval => 0, -verbose => 2 ) if( $man );
 }
 if( $version ) {
-    printf( "%s version %s\n%s", basename( $0 ),
+    printf( "%s version %s\n%s",                                           basename( $0 ),
             join( '-', ( $VERSION =~ /([[:xdigit:]]{4})/g )[ -4 .. -1 ] ), $copyright );
     exit;
 }
@@ -544,6 +554,8 @@ foreach my $host ( @ARGV ) {
 exit
 
 __END__
+
+=pod
 
 =head1 SSL_CHECK_CHAIN
 

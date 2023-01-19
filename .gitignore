@@ -7,3 +7,6 @@
 *.tar
 *.tar.gz
 tests
+certtools-*
+RELEASE
+.tagged

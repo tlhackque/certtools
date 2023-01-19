@@ -15,3 +15,9 @@ while( @ARGV ) {
     $in =~ s/^$marker\n/$help/m;
 }
 print( $in );
+
+__END__
+
+=pod
+
+=cut

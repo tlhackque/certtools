@@ -1,0 +1,40 @@
+To install certtools:
+
+You do NOT need to clone the repository unless you want to submit patches.
+
+Obtain a release tarball from https://github.com/tlhackque/certtools
+ - Look for the "Releases" note on the right side of the page, and click "Latest"
+ - Under "Assets", click a versioned tarball and corresponding signature link
+   (Or download using a command line tool such as wget or curl)
+
+e.g. if the latest release is V2.1.2, you could obtain it with:
+  wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz
+  wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig
+
+Verify and unpack the tarball, e.g.
+gpg --verify certtools-2.1.2.tar.xz.sig && tar -xf certtools-2.1.2.tar.xz && cd certtools-2.1.2
+
+To install in the default locations (/usr/local/sbin and /usr/local/share/man/man1):
+
+make install
+
+The installer will check for Perl modules that are required by the Perl-based tools.  If any
+are missing or too old, it wil provide instructions for obtaining them.
+
+To install in an alternate root, e.g. /opt:
+
+make prefix=/opt install
+
+To stage when incorporating in a larger system kit:
+
+DESTDIR=/opt/stage make
+DESTDIR=/opt/stage prefix=/usr
+
+For more complex requirements, see the Makefile.
+
+You can delete the directory into which you unpacked the release.
+
+Note that the release tarball does not include the .md version of the documentation;
+these are provided for easy browsing on GitHub.  The contents are the same as the man
+pages and the --man (or -h) output from the tools.  --man (for the Perl tools) and -h
+(for the bash tools) are preferred, since they can't be separated from their tool.

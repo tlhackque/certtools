@@ -11,6 +11,8 @@ is available by using th `--man` option.  The corresponding `.md` files
 in the repository have identical content, and can be consulted without installing the tools.
 
 Recent updates:
+
+ - Added signed distribution kits and Makefile-based install (and uninstall)
  - Added acme_token_check
  - Added ssl_status reporting tool
  - Server certificate selection is more reliable
@@ -21,11 +23,15 @@ Recent updates:
 
 ## Installation
 
- - Download the `.tar.gz` file from [GitHub](https://github.com/tlhackque/certtools/releases).
- - Unpack the archive, and move the script(s) to a directory on your path
- - If desired, move the `.1` files to someplace in `MANPATH` (or man's config).  The `--man` option's output is identical.
- - `ssl_status_prereqs` may be used to verify that you have the Perl modules used by `ssl_status`
- - It is **not** necessary to clone the repository unless you wish to contribute patches.  The repository contains some files used to build the distribution, which are not required to install or use the tools.
+ - See [INSTALL](https://github.com/tlhackque/certtools/blob/master/INSTALL) for installation instructions.
+ - It is **not** necessary to clone the repository unless you wish to contribute patches.  The repository contains some files used to build the distribution that are not required to install or use the tools.
+   - INSTALL is also in the release tarball, which is located at [https://github.com/tlhackque/certtools](https://github.com/tlhackque/certtools)
+   - Look for the `Releases` note on the right side of the page, and click `Latest`
+   - Under `Assets`, click a versioned tarball and corresponding signature link
+    (Or download using a command line tool such as wget or curl)
+    e.g. if the latest release is V2.1.2, you could obtain it with:
+    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz`
+    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig`
 
 ## getcert
 Get server's TLS certificate
