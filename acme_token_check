@@ -2,7 +2,7 @@
 
 # Net::DNS requires at least 5.8.9
 
-use 5.28.0;
+use 5.10.0;
 
 our $VERSION = '$Id$';
 

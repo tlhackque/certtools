@@ -1,5 +1,14 @@
 To install certtools:
 
+Required tools:
+GNU bash, Make and perl
+
+basic POSIX tools, including:
+      tar, install
+
+Strongly recommended:
+gpg
+
 You do NOT need to clone the repository unless you want to submit patches.
 
 Obtain a release tarball from https://github.com/tlhackque/certtools
@@ -38,3 +47,23 @@ Note that the release tarball does not include the .md version of the documentat
 these are provided for easy browsing on GitHub.  The contents are the same as the man
 pages and the --man (or -h) output from the tools.  --man (for the Perl tools) and -h
 (for the bash tools) are preferred, since they can't be separated from their tool.
+
+Building release kits requires additional tools:
+
+If the necessary tools can't be found on PATH, make variables can be
+set for each one in the make invocation - though if necessary for more
+than one or two, it's better to set an appropriate PATH.
+
+From CPAN:
+cpan install Pod::Checker Pod::Markdown
+
+Options:
+cpan install Perl::Tidy
+
+shellcheck (see https://www.shellcheck.net/)
+
+GNU tools:
+      make, sed
+
+basic POSIX tools, including:
+      tar, head, cp, date, chmod, chown, mkdir, rm, install, echo, tee

@@ -3,7 +3,7 @@
 use warnings;
 use strict;
 
-# Keeping mondules used to a bare minimum - especially for checks
+# Keeping modules used to a bare minimum - especially for checks
 use File::Basename;
 use Text::Abbrev;
 
@@ -17,40 +17,71 @@ COPYRIGHT
 
 our $VERSION = '$Id$';
 
-my %mods = map { $_ => 0 } ( qw( IO::Socket::SSL ) );
+my( %mods, %pragma, %excluded, $privateRE );
 
-sub help;
-sub man;
+sub save;
+sub restore;
+sub loop;
+sub cont;
 sub version;
-my( $quiet, $debug );
+sub help;
 
-my %opts = ( quiet   => \$quiet,
-             debug   => \$debug,
-             version => \&version,
-             help    => \&help,
-             man     => \&help,
-           );
-while( @ARGV && $ARGV[0] =~ /^--?(.*)$/ ) {
-    my $opt = $1;
-    shift @ARGV;
-    last if( $opt eq '' );
-    my $name = { abbrev( keys %opts ) }->{$opt};
-    if( $name ) {
-        my $var = $opts{$name};
-        if( ref $var eq 'CODE' ) {
-            $var->( $name );
+# Allow checks to work in taint mode.  Detection currently won't.
+
+foreach my $ev ( qw/PATH BASH_ENV ENV/ ) {
+    $ENV{$ev} =~ /^(.*)$/ and $ENV{$ev} = $1 if( exists $ENV{$ev} );
+}
+
+# Command line options
+
+my( $data, $quiet, $debug, @privateRE, @exclude, @include );
+
+if( @ARGV ) {
+    my %opts = ( exclude => \@exclude,
+                 include => \@include,
+                 modules => \$data,
+                 private => \@privateRE,
+                 quiet   => \$quiet,
+                 debug   => \$debug,
+                 version => \&version,
+                 help    => \&help,
+                 man     => \&help,
+               );
+    my %optkeys = ( abbrev( keys %opts ) );
+
+    while( @ARGV && $ARGV[0] =~ /^--?(?:([^=]*)(?:=(.*))?)?$/ ) {
+        my( $opt, $arg ) = ( $1, $2 );
+        shift @ARGV;
+        last if( $opt eq '' );
+        my $name = $optkeys{$opt};
+        if( $name ) {
+            my $var = $opts{$name};
+            if( ref $var eq 'CODE' ) {
+                $var->( $name );
+            } elsif( ref $var eq 'ARRAY' ) {
+                push @$var, defined $arg ? $arg : 1;
+            } else {
+                $$var = defined $arg ? $arg : 1;
+            }
         } else {
-            $$var = 1;
+            printf STDERR ( "Unknown or ambiguous option --%s\n", $opt );
+            exit( 1 );
         }
-    } else {
-        printf STDERR ( "Unknown option --%s\n", $opt );
-        exit 1;
     }
 }
+
+# Remaining arguments
+
 if( @ARGV ) {
+
+    # Detection - note that this will not work in taint mode due to CPAN::Shell
+
+    require Module::CoreList;
+    require CPAN;
+    require POSIX;
     require Scalar::Util;
     Scalar::Util->import( qw/isvstring/ );
-    my %pragma = (
+    %pragma = (
             map { $_ => 1 } (qw/attributes autodie autouse base bigint bignum bigrat/,
                              qw/blib bytes charnames constant/,
                              qw/diagnostics encoding feature fields filetest if integer/,
@@ -58,125 +89,304 @@ if( @ARGV ) {
                              qw/open ops overload overloading parent re sigtrap sort/,
                              qw/strict vars subs threads thread::shared utr8 vars vmsish/,
                              qw/warnings warnings::register/ ) );
+    %excluded  = map { $_ => 1 } split( /, ?/, join( ',', @exclude ) );
+    $mods{$_}  = [ 0, '', '--include' ] foreach( split( /, ?/, join( ',', @include ) ) );
+    $privateRE = join( '|', map { "(?:$_)" } @privateRE ) if( @privateRE );
+    $privateRE = eval { qr{$privateRE} }                  if( defined $privateRE );
+    die( "--private regular expression did not compile\n$@" ) if( $@ );
+    printf STDERR ( "--private match: %s\n", "$privateRE" )
+        if( $debug && defined $privateRE );
+
+    # Inspect files - Use <<>> if available, otherwise make magic safer
 
     my( $first, $indata ) = ( 1, 0 );
-    while( <ARGV> ) {
-        printf STDERR ( "Starting %s\n", $ARGV ), $first = 0 if( $first && $debug );
-        chomp;
-        s/^\s+//;
-        s/\s+$//;
-        next if( $indata || /^$/ );
-        if( /^__(?:DATA|END)__$/ ) {
-            $indata = 1;
-            next;
+    if( "$]" < 5.02105 ) {
+        $_ = "<" . $_ foreach( @ARGV );
+        while( <ARGV> ) {
+            loop( $first, $indata );
+        } continue {
+            cont( $first, $indata );
         }
-        if( /^.*(?:eval\s*["{'])?(require|use)\s+([\w:]+)\s*[;(q'"]/ ) {
-            my( $verb, $mod ) = ( $1, $2 );
-            if( $debug ) {
-                my $attrs = '';
-                if( $pragma{$mod} ) {
-                    $attrs = 'pragma';
-                } elsif( $mod =~ /^TL::/ ) {
-                    $attrs = 'private';
-                } elsif( exists $mods{$mod} ) {
-                    $attrs = "duplicate";
-                }
-                printf STDERR (
-                        "%s:%u %s $mod %s\n", $ARGV, $., $verb,
-                        $attrs ? "($attrs)" : '' );
-            }
-            next if( exists $mods{$mod} || $pragma{$mod} || $mod =~ /^TL::/ );
-            $mods{$mod} = 0;
-        }
-    } continue {
-        if( eof ) {
-            printf STDERR ( "End of %s\n", $ARGV ) if( $debug );
-            close( ARGV );
-            ( $first, $indata ) = ( 1, 0 );
-        }
+    } else {
+        eval 'while( <<>> ) {
+            loop( $first, $indata );
+        } continue {
+            cont( $first, $indata );
+        }';
+        die( $@ ) if( $@ );
     }
-    my $w = 0;
+
+    # Process results - separate core / dual-life from CPAN only
+
+    my( $mw, $vw ) = ( length( "Module" ), length( 'Expected' ) );
     foreach my $mod ( keys %mods ) {
-        $w = length( $mod ) if( length( $mod ) > $w );
+        $mw = length( $mod ) if( length( $mod ) > $mw );
+        my $perl = Module::CoreList->first_release( $mod );
+        if( $perl ) {
+            if( $perl =~ /^(\d)\.(?:(\d{3})(\d*)?)?$/ ) {
+                if( defined $3 && length $3 ) {
+                    $perl = sprintf( "%d.%d.%d", $1, $2, $3 );
+
+                } elsif( defined $2 && length $2 ) {
+                    $perl = sprintf( "%d.%d", $1, $2 );
+
+                } else {
+                    $perl = sprintf( "%d", $1 );
+
+                }
+            }
+            $mods{$mod}[1] = "perl $perl";
+        } else {
+            my( $so, $se ) = save;
+            my $cpan = CPAN::Shell->expand( "Module", $mod );
+            restore( $so, $se );
+            if( $cpan && !$cpan->uptodate ) {
+                $cpan = $cpan->cpan_version;
+                $cpan = $cpan ? "CPAN (latest $cpan)" : "CPAN";
+            } else {
+                $cpan = "CPAN";
+            }
+            $mods{$mod}[1] = $cpan;
+        }
+
+        # See what versions exist here - presumably what tests used
+
         eval "require $mod";
         if( $@ ) {
-            printf STDERR ( "%s needs %s, which is not installed\n", $ARGV, $mod );
+            my @refs = @{ $mods{$mod} };
+            my $ver  = shift @refs;
+            my $perl = shift @refs;
+            my %u    = map { $_ => 1 } @refs;
+            @refs = sort keys %u;
+            printf STDERR (
+                    "%s %s %s, which is not installed\n", join( ', ', @refs ),
+                    @refs == 1 ? 'needs' : 'need',        $mod );
+            printf STDERR ( "%s is a core module starting with %s\n", $mod, $perl )
+                if( $perl !~ /^CPAN/ );
             next;
         }
         my $ver = eval "\$${mod}::VERSION";
-        $ver        = 0 unless( defined $ver );
-        $ver        = sprintf( "%vd", $ver ) if( isvstring( $ver ) );
-        $mods{$mod} = $ver;
+        $ver = 0 unless( defined $ver );
+        $ver = sprintf( "%vd", $ver )      if( isvstring( $ver ) );
+        $vw  = length( $ver || 'unknown' ) if( length( $ver || 'unknown' ) > $vw );
+        $mods{$mod}[0] = $ver;
     }
+
+    # Output results to STDOUT
+
+    printf( "# Required as of %s\n", POSIX::strftime( '%a %d-%b-%Y %T', localtime ) );
+    printf( "# %-*s %-*s Source\n",  $mw, 'Module', $vw, 'Expected' );
+    printf( "# %s %s ------\n",      '-' x $mw, '-' x $vw );
     foreach my $mod ( sort keys %mods ) {
-        my $ver = $mods{$mod};
+        my $ver = $mods{$mod}[0];
         $ver = 'unknown' if( $ver eq '0' );
-        printf( "%-*s %s\n", $w, $mod, $ver );
+        printf( "  %-*s %-*s %s\n", $mw, $mod, $vw, $ver, $mods{$mod}[1] );
     }
     exit( 0 );
-} else {
-    while( <DATA> ) {
-        chomp;
-        s/^\s+//;
-        s/\s+$//;
-        next if( /^$/ );
-        last if( /^__END__$/ );
-        my( $mod, $ver ) = split( /\s+/, $_ );
-        $mods{$mod} = $ver;
-    }
 }
 
+# Checking
+
 print STDERR ( "Checking prerequisites\n" ) unless( $quiet );
+
+# Read requirements table.  Assumes valid output from a previous run.
+
+my $ifh;
+if( defined $data && length $data ) {
+    if( $data eq '-' ) {
+        $ifh = \*STDIN;
+    } else {
+        open( $ifh, '<', $data ) or die( "$data: $!\n" );
+    }
+} else {
+    $ifh = \*DATA;
+}
+while( <$ifh> ) {
+    chomp;
+    s/^\s+//;
+    s/\s+$//;
+    next                      if( /^$/ );
+    last                      if( /^__END__$/ );
+    print STDERR ( $_, "\n" ) if( $debug );
+    next                      if( /^\s*#/ );
+    my( $mod, $ver, $perl ) = split( /\s+/, $_, 3 );
+    $mods{$mod} = [ $ver, $perl ];
+}
+
+# Determine if each module is installed, and check its version
 
 my $w = 0;
 foreach( keys %mods ) {
     $w = length if length > $w;
 }
-my @missing;
-foreach( sort keys %mods ) {
-    my $ver = $mods{$_};
-    eval "require $_" or do {
-        push @missing, $_;
-        printf STDERR ( "Required Perl module %s is not installed\n", $_ );
+my( @missing, @cmissing );
+foreach my $mod ( sort keys %mods ) {
+    my( $ver, $perl ) = @{ $mods{$mod} }[ 0, 1 ];
+    eval "require $mod" or do {
+        printf STDERR ( "Required Perl module %s is not installed\n", $mod );
+        if( $perl =~ /^CPAN/ ) {
+            push @missing, $mod;
+        } else {
+            printf STDERR (
+                    "    %s is a core module starting with %s\n", $mod,
+                    $perl );
+            push @cmissing, $mod;
+        }
         next;
     };
     if( $ver ne 'unknown' ) {
-        eval "$_->VERSION( $ver )";
+        eval "$mod->VERSION( $ver )";
         if( $@ ) {
-            $@ =~ s/^$_ /    /;
+            $@ =~ s/^$mod /    /;
             $@ =~ s/ at .*\Z//s;
             $@ =~ s/this is only version/found version/;
             printf STDERR (
                     "Installed Perl module %s: version is less than %s\n%s\n",
-                    $_, $ver, $@ );
-            push @missing, $_;
+                    $mod, $ver, $@ );
+            if( $perl =~ /^CPAN/ ) {
+                push @missing, $mod;
+            } else {
+                push @cmissing, $mod;
+            }
             next;
         }
     }
-    printf STDERR ( "Found %-*s version %s\n", $w, $_, $_->VERSION || '(unknown)' )
+    printf STDERR ( "Found %-*s version %s\n", $w, $mod, $mod->VERSION || '(unknown)' )
         unless( $quiet );
 }
 
-if( @missing ) {
+# Summarize results and provide remediation instructions
+
+if( @missing || @cmissing ) {
+    my $n = @missing + @cmissing;
     printf STDERR (
-                    <<'XXX', @missing == 1 ? ( 'module is', 'it', 'its' ) : ( 'modules are', 'them', 'their' ) );
-If the missing %s not available in your distribution (preferred),
+            "\n%u %s %s %s missing\n", $n,
+            @missing ? @cmissing ? 'CPAN and core' : 'CPAN' : 'core',
+            $n == 1 ? ( 'module', 'is' ) : ( 'modules', 'are' ) );
+
+    if( @missing ) {
+        printf STDERR (
+                        <<'XXX', @missing == 1 ? ( 'module is', 'it', 'its' ) : ( 'modules are', 'them', 'their' ) );
+
+If the missing CPAN %s not available in your distribution (preferred),
 you can install %s (and %s prerequisites) from CPAN with the following command:
 
 XXX
-    print STDERR ( "cpan install ", join( " ", @missing ), "\n" );
-    exit 1;
+        print STDERR ( "cpan install ", join( " ", @missing ), "\n" );
+
+    }
+    if( @cmissing ) {
+        printf STDERR (
+                        <<'XXX', @cmissing == 1 ? ( 'module is', 'it', 'its' ) : ( 'modules are', 'them', 'their' ) );
+
+If the missing core %s not available in your distribution (preferred),
+you may be able to install %s (and %s prerequisites) from CPAN with the following command:
+
+XXX
+        print STDERR ( "cpan install ", join( " ", @cmissing ), "\n" );
+        print STDERR (
+                 "However, some core modules can only be installed if you upgrade Perl.\n"
+        );
+    }
+    exit( 1 );
 } else {
     print STDERR ( "All prerequisites found\n" ) unless( $quiet );
 }
 
-exit;
+exit( 0 );
+
+# I/O - suppress noise from CPAN::Shell
+
+sub save {
+    open( my $saveout, '>&STDOUT' )         or die( "STDOUT $!|n" );
+    open( my $saveerr, '>&STDERR' )         or die( "STDERR $!|n" );
+    open( STDOUT, '>', '/dev/null' )        or die( "OUTnull $!\n" );
+    open( STDERR, '>&' . fileno( STDOUT ) ) or die( "ERRnull $!\n" );
+    return ( $saveout, $saveerr );
+}
+
+sub restore {
+    my( $saveout, $saveerr ) = @_;
+
+    open( STDOUT, '>&' . fileno( $saveout ) ) or die( "rSTDOUT $!\n" );
+    open( STDERR, '>&' . fileno( $saveerr ) ) or die( "rSTDERR $!\n" );
+    close( $saveout );
+    close( $saveerr );
+    return;
+}
+
+# Detection
+
+sub loop {
+    my( $first, $indata ) = @_;
+
+    my $file = $ARGV;
+    $file =~ s/^<//;
+
+    if( $first && $debug ) {
+        $_[0] = 0;
+        printf STDERR ( "Starting %s\n", $file );
+    }
+    chomp;
+    s/^\s+//;
+    s/\s+$//;
+    s/\s*#.*$//;
+    return if( $indata || /^$/ );
+    if( /^__(?:DATA|END)__$/ ) {
+        printf STDERR ( "  End of code at line %u\n", $. ) if( $debug );
+        $_[1] = 1;
+        return;
+    }
+    if( /^.*(?:eval\s*["{'])?(require|use)\s+([\w:]+)\s*[;(q'"]/ ) {
+        my( $verb, $mod ) = ( $1, $2 );
+        if( $debug ) {
+            my $attrs = '';
+            if( $pragma{$mod} ) {
+                $attrs = 'pragma';
+            } elsif( $excluded{$mod} ) {
+                $attrs = 'excluded';
+            } elsif( $privateRE && $mod =~ /$privateRE/ ) {
+                $attrs = 'private';
+            } elsif( exists $mods{$mod} ) {
+                $attrs = "duplicate";
+            }
+            printf STDERR ( "  %6u %s $mod %s\n", $., $verb, $attrs ? "($attrs)" : '' );
+        }
+        return
+            if(    $pragma{$mod}
+                || $excluded{$mod}
+                || ( $privateRE && $mod =~ /$privateRE/ ) );
+        if( exists $mods{$mod} ) {
+            push @{ $mods{$mod} }, $file;
+        } else {
+            $mods{$mod} = [ 0, '', $file ];
+        }
+    }
+}
+
+# continue block of detection loop
+
+sub cont {
+    my( $first, $indata ) = @_;
+
+    if( eof ) {
+        my $file = $ARGV;
+        $file =~ s/^<//;
+        printf STDERR ( "End of %s at line %u\n", $file, $. ) if( $debug );
+        close( ARGV );
+        ( $_[0], $_[1] ) = ( 1, 0 );
+    }
+}
+
+# Output version string
 
 sub version {
     printf( "%s version %s\n%s",                                           basename( $0 ),
             join( '-', ( $VERSION =~ /([[:xdigit:]]{4})/g )[ -4 .. -1 ] ), $copyright );
     exit;
 }
+
+# help (and man)
 
 sub help {
     my( $opt ) = @_;
@@ -193,27 +403,6 @@ sub help {
 }
 
 __DATA__
-Config            unknown
-Cwd               3.60
-Date::Parse       2.30
-Errno             1.0901
-Fcntl             1.05
-File::Basename    2.74
-File::Spec        3.60
-File::Temp        0.2304
-Getopt::Long      2.52
-IO::Socket::IP    0.41
-IO::Socket::SSL   2.080
-MIME::Base64      3.13
-MIME::QuotedPrint 3.13
-Net::DNS          0.66
-Net::SMTP         3.13
-POSIX             1.09
-Perl::OSType      1.002
-Pod::Usage        1.69
-Sys::Hostname     1.11
-Text::Abbrev      1.02
-Text::ParseWords  3.27
 __END__
 
 =pod
@@ -227,7 +416,8 @@ required_modules - verify that required Perl modules are installed
 required_modules [options] [file...]
 
 Options:
-  --quiet   --debug  --help --man --version
+  --quiet --private --debug    --exclude --include --modules
+  --help  --man     --version
 
 =head1 OPTIONS
 
@@ -239,7 +429,30 @@ Only output errors.
 
 =item B<--debug>
 
-Debugging info.
+Print debugging info.
+
+=item B<--exclude>=I<module>
+
+Exclude I<module> from the list of required modules.  I<module> can
+be a comma-separated list.  B<--exclude> can be specified more than onece.
+
+=item B<--include>=I<module>
+
+Include I<module> in the list of required modules.  I<module> can
+be a comma-separated list.  B<--exclude> can be specified more than onece.
+
+=item B<--modules>=I<file>
+
+Use F<file> instead of the built-in module list.
+
+=item B<--private>=I<regex>
+
+Regular expression specifying private modules - modules not required or
+present in a released version, but invoked at runtime under some circumstance.
+
+If specified more than once, each is is matched independently.
+
+e.g. I<--private=^ZZ::>  or I<'--private=^(?:ZZ|YY)::Woofer$'>
 
 =item B<--help>
 
@@ -253,15 +466,51 @@ Full manual.
 
 =head1 DESCRIPTION
 
-Used at installation, lists missing modules and installed modules that don't
-meet the version requirements.
+During installation, B<required_modules> lists missing modules and
+installed modules that don't meet the version requirements.  No files
+are specified; the list is built-in or provided by B<--modules>.
 
-Used when releases are made, specify the dependent programs; the list
-of required modules will be output on F<stdout>.
+When releases are made, B<required_modules> creates the list of
+modules required by the specified F<file>(s), uing the modules
+installed on the release system as the minimum supported version.
+.
+The list of required modules will be output on F<stdout>.
+
+The modules are located by scanning the dependendent programs for
+I<use> and I<require> statements. This is a simple text-based scan;
+I<only Perl can parse Perl>.
+
+Use B<--exclude> to remove any false detections.  If any modules are
+missed, you can use B<--include> or create a supplementary file
+containing just "require" statements if any modules.  The filee need
+not be executable or otherwise valid Perl.
 
 An external tool, such as I<sed>, can replace the list, which is contained
 in the I<__DATA__> section of B<required_modules>.
 
+=head1 EXAMPLES
+
+These F<Makefile> recipes will update B<required_modules> during release and
+check for modules during install.  This example assumes GNU I<Make> and I<sed>.
+
+    .PHONY : all
+     all : ptools ...
+
+    ptools := tool1 tool2 tool3 module_checker
+
+    module_checker : required_modules $(filter-out required_modules, $(ptools))
+            ./required_modules $(filter-out required_modules,$^) | \
+            sed required_modules -Ee'/^__DATA__$$/,/^__END__$$/{/^__(DATA|END)__$$/!d; }; /^__DATA__$$/r/dev/stdin' >module_checker
+            chmod +x module_checker
+
+    .PHONY : install
+    install : ...
+            ./module_checker --quiet
+            $(INSTALL_PROGRAM) $(filter-out module_checker,$(ptools)) $(DESTDIR)$(....)/
+
+Alternatively, rather than using I<sed> the generated F<modules> file could be shipped with
+B<required_modules> and specified with B<--modules>.  The downside is having a separate
+file to manage in the distribution.
 
 =head1 BUGS
 
@@ -306,7 +555,7 @@ Bug reports, suggestions and patches are welcomed by the original author.
 
 =head1 SEE ALSO
 
-I<sed(1)>
+I<sed(1)> I<make(1)>
 
 I<POD version $Id$>
 

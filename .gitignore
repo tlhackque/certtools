@@ -8,5 +8,6 @@
 *.tar.gz
 tests
 certtools-*
+module_checker
 RELEASE
 .tagged

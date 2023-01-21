@@ -12,11 +12,14 @@ man1dir         := $(mandir)/man1
 manext          := .1
 man1ext         := .1
 exec_prefix     := $(prefix)
-sbindir          := $(exec_prefix)/sbin
+sbindir         := $(exec_prefix)/sbin
+
+installdirs     := $(sbindir) $(man1dir)
 
 INSTALL         := install -p
 INSTALL_PROGRAM := $(INSTALL)
 INSTALL_DATA    := $(INSTALL) -m 644
+INSTALL_DIR     := $(INSTALL) -d
 
 # Specify key="deadbeef" or key="deadbeef beeffeed" on command line (else default)
 GPG          := gpg
@@ -28,22 +31,37 @@ POD2MAN      := pod2man
 POD2MARKDOWN := pod2markdown
 SHELLCHECK   := shellcheck
 
+CHMOD        := chmod
+CHOWN        := chown
+CP           := cp
+DATE         := date
+ECHO         := echo
+GIT          := git
+HEAD         := head
+MKDIR        := mkdir
+RM           := rm
+SED          := sed
+SORT         := sort
+TAIL         := tail
+TAR          := tar
+TEE          := tee
+
 SHELL        := bash
+
+#sorttags := --sort=version:refname
+sorttags :=  | $(SORT) -t. -k1.1,1.1 -k1.2,1n -k2,2n -k3,3n -k4,4n
 
 # Extract release number from source
 
-kitversion := $(patsubst V%,%,$(strip $(file <RELEASE)))
+kitversion := $(patsubst V%,%,$(strip $(shell [ -s $(UNOFFICIAL)RELEASE ] && $(HEAD) -n1 RELEASE || $(ECHO) "unofficial")))
 kitname    := certtools-$(kitversion)
 kitowner   := 0:0
 
 # If in a Git working directory and the git command is available,
 # get the last tag in case making a distribution.
-
-ifneq "$(strip $(shell [ -d '.git' ] && echo 'true' ))" ""
-  gitcmd   := $(shell command -v git)
-  ifneq "$(strip $(gitcmd))" ""
-    gittag := $(shell git tag --sort=version:refname | tail -n1)
-  endif
+inGitWd    := $(strip $(shell [ -d '.git' ] && [ -n "$$(command -v $(GIT))" ] && $(ECHO) 'true'))
+ifneq ($(inGitWd),)
+    gittag := $(shell $(GIT) tag -l $(sorttags) | $(TAIL) -n1)
 endif
 
 # file types from which tar can infer compression, if tool is installed
@@ -54,8 +72,8 @@ endif
 
 kittypes := gz xz
 
-# Make tools excluded from documentation build
-xtools := required_modules makereadme
+# Make tools excluded from documentation build and install
+xtools := required_modules module_checker makereadme
 
 # Included tools
 
@@ -66,7 +84,7 @@ tools := $(ptools) $(btools)
 
 .PHONY : all
 
-all: docs perlmods
+all: docs
 
 # Documents - the .mds are not installed; they are for GitHub browsers.
 
@@ -82,26 +100,26 @@ kitfiles := INSTALL README.md LICENSE $(tools) $(docs) Makefile
 docs: $(docs) podcheck
 
 README.md : README.md.in $(btools) makereadme
-	 ./makereadme $(btools) <README.md.in >$@
+	 $(PERL) makereadme $(btools) <README.md.in >$@
 
 .PHONY : podcheck
 
-podcheck : $(ptools)
+podcheck : $(filter-out module_checker,$(ptools))
 	$(PODCHECKER) $(ptools)
 
 %.md : %
 	cat $^ | $(POD2MARKDOWN) - $@
 
 %.1 : %
-	$(POD2MAN) --section 1 --center "Certificate Tools" --release  "" --date "$(shell date -r $< +'%d-%b-%Y')" $< $@
+	$(POD2MAN) --section 1 --center "Certificate Tools" --release  "" --date "$(shell $(DATE) -r $< +'%d-%b-%Y')" $< $@
 
 # required_modules data
 
-.PHONY : perlmods
-perlmods : $(filter-out required_modules, $(ptools))
-	./required_modules $^ >modules.tmp
-	sed required_modules -i -Ee'/^__DATA__$$/,/^__END__$$/{/^__(DATA|END)__$$/!d; }; /^__DATA__$$/rmodules.tmp'
-	rm -f modules.tmp
+module_checker : required_modules $(filter-out module_checker, $(ptools))
+	$(PERL) required_modules --include=IO::Socket::SSL --private=^TL:: $(filter-out required_modules,$^) | \
+	$(SED) required_modules -Ee'/^__DATA__$$/,/^__END__$$/{/^__(DATA|END)__$$/!d; }; /^__DATA__$$/r/dev/stdin' >module_checker
+	$(SED) -i module_checker -e'1s/$$/ -T/'
+	$(CHMOD) +x module_checker
 
 # Make tarball kits - various compressions
 
@@ -109,7 +127,7 @@ perlmods : $(filter-out required_modules, $(ptools))
 
 dist : signed-dist
 
-ifeq ($(strip $(gitcmd)),)
+ifeq ($(inGitWd),)
 signed-dist : $(foreach type,$(kittypes),$(kitname).tar.$(type).sig)
 else
 signed-dist : $(foreach type,$(kittypes),$(kitname).tar.$(type).sig) .tagged
@@ -120,25 +138,26 @@ unsigned-dist : $(foreach type,$(kittypes),$(kitname).tar.$(type))
 # Tarball build directory
 
 $(kitname)/% : %
-	@mkdir -p $(dir $@)
-	@-chown $(kitowner) $(dir $@)
-	cp -p $< $@
-	@-chown $(kitowner) $@
+	@$(MKDIR)  -p $(dir $@)
+	@-$(CHOWN) $(kitowner) $(dir $@)
+	$(CP) -p $< $@
+	@-$(CHOWN) $(kitowner) $@
 
 # Clean up after builds
 
 .PHONY : clean
 
 clean:
-	rm -rf $(kitname) $(foreach type,$(kittypes),$(kitname).tar.$(type){,.sig})
+	$(RM) -rf $(kitname) $(foreach type,$(kittypes),$(kitname).tar.$(type){,.sig}) module_checker
 
 # Install programs and doc
 
 .PHONY : install
 
-install : $(mans) $(tools) installdirs
-	./required_modules --quiet
-	$(INSTALL_PROGRAM) $(tools) $(DESTDIR)$(sbindir)/
+install : $(mans) $(tools)
+	$(PERL) module_checker --quiet
+	$(INSTALL_DIR) $(foreach dir,$(installdirs),$(DESTDIR)$(dir))
+	$(INSTALL_PROGRAM) $(filter-out $(xtools), $(tools)) $(DESTDIR)$(sbindir)/
 	-$(INSTALL_DATA) $(mans) $(DESTDIR)$(man1dir)/
 
 # un-install
@@ -146,21 +165,16 @@ install : $(mans) $(tools) installdirs
 .PHONY : uninstall
 
 uninstall :
-	-rm -f $(foreach tool,$(tools),$(DESTDIR)$(sbindir)/$(tool))
-	-rm -f $(foreach man,$(mans),$(DESTDIR)$(man1dir)/$(man))
-
-# create install directory tree (especially when staging)
-
-installdirs :
-	$(INSTALL) -d $(DESTDIR)$(sbindir) $(DESTDIR)$(man1dir)
+	-$(RM) -f $(foreach tool,$(filter-out $(xtools), $(tools)),$(DESTDIR)$(sbindir)/$(tool))
+	-$(RM) -f $(foreach man,$(mans),$(DESTDIR)$(man1dir)/$(man))
 
 # rules for making tarballs - $1 is file type that implies compression
 
 define make_tar =
 
-%.tar.$(1) : $$(foreach f,$$(kitfiles), %/$$(f))
-	tar -caf $$@ $$^
-	@-chown $(kitowner) $$@
+%.tar.$(1) : $(foreach f,$(kitfiles), %/$(f))
+	$(TAR) -caf $$@ $$^
+	@-$(CHOWN) $(kitowner) $$@
 
 endef
 
@@ -170,20 +184,20 @@ $(foreach type,$(kittypes),$(eval $(call make_tar,$(type))))
 # Depends on everything in git (not just kitfiles), everything compiled, and
 # all the release kits.
 
-ifneq ($(strip $(gitcmd)),)
+ifneq ($(inGitWd),)
 .PHONY : tag
 
 tag : .tagged
 
-.tagged : $(shell git ls-tree --full-tree --name-only -r HEAD) unsigned-dist
-	@if git ls-files --others --exclude-standard --directory --no-empty-directory --error-unmatch -- ':/*' >/dev/null 2>/dev/null || \
-	    [ -n "$$(git diff --name-only)$$(git diff --name-only --staged)" ]; then \
-	    echo " *** Not tagging V$(kitversion) because working directory is dirty"; echo ""; false ;\
+.tagged : $(shell $(GIT) ls-tree --full-tree --name-only -r HEAD) unsigned-dist
+	@if $(GIT) ls-files --others --exclude-standard --directory --no-empty-directory --error-unmatch -- ':/*' >/dev/null 2>/dev/null || \
+	    [ -n "$$($(GIT) diff --name-only)$$($(GIT) diff --name-only --staged)" ]; then                   \
+	    $(ECHO) " *** Not tagging V$(kitversion) because working directory is dirty"; $(ECHO) ""; false ;\
 	 elif [ "$(strip $(gittag))" == "V$(kitversion)" ]; then                 \
-	    echo " *** Not tagging because V$(kitversion) already exists";       \
-	    echo ""; false;                                                      \
+	    $(ECHO) " *** Not tagging because V$(kitversion) already exists";    \
+	    $(ECHO) ""; false;                                                   \
 	 else                                                                    \
-	    git tag V$(kitversion) && echo "Tagged as V$(kitversion)" | tee .tagged || true; \
+	    $(GIT) tag V$(kitversion) && $(ECHO) "Tagged as V$(kitversion)" | $(TEE) .tagged || true; \
 	 fi
 
 endif
@@ -191,9 +205,9 @@ endif
 # create a detached signature for a file
 
 %.sig : % Makefile
-	@-rm -f $<.sig
+	@-$(RM) -f $<.sig
 	$(GPG) --output $@ --detach-sig $(foreach k,$(key), --local-user "$(k)") $(basename $@)
-	@-chown $(kitowner) $@
+	@-$(CHOWN) $(kitowner) $@
 
 # perltidy
 
