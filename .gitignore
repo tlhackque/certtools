@@ -4,8 +4,17 @@
 .\#*
 *.swp
 *~
+*.sig
 *.tar
+*.tgz
 *.tar.gz
+*.tar.xz
+*.tar.lzop
+*.tar.lzma
+*.tar.Z
+*.tar.zst
+*.tar.bz
+*.tar.bz2
 tests
 certtools-*
 module_checker
