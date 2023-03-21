@@ -4,7 +4,7 @@ use warnings;
 use strict;
 
 my $copyright = << 'COPYRIGHT';
-Copyright (C) 2021 Timothe Litt <litt at acm.org>
+Copyright (C) 2021 - 2023 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
@@ -91,12 +91,13 @@ my @columns = (
            width => 8,
            class => 'status',
            match => { VALID   => 'valid',   INVALID => 'invalid', NOVERIFY => 'noverify',
-                      EXPIRED => 'expired', MISSING => 'missing', NotYet   => 'pending' },
+                      EXPIRED => 'expired', MISSING => 'missing', OFFLINE  => 'offline',
+                      NotYet  => 'pending' },
         },
         {  name => 'Expires',
            from => sub {
                my $cert = shift;
-               return '' if( $cert->{status} eq 'MISSING' );
+               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
                return date( $cert, 'end' );
            },
            class => 'expires date',
@@ -104,7 +105,7 @@ my @columns = (
         {  name => 'Days',
            from => sub {
                my $cert = shift;
-               return '' if( $cert->{status} eq 'MISSING' );
+               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
                return days( $cert, 'end', $now );
            },
            width => 5,
@@ -114,7 +115,7 @@ my @columns = (
         {  name => 'Renews',
            from => sub {
                my $cert = shift;
-               return '' if( $cert->{status} eq 'MISSING' );
+               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
                my $d2g =
                pdelta( $cert->{end} + ( $cert->{renewbefore} * $day ), $now, 2 );
                if( $d2g == 1 ) {
@@ -394,6 +395,31 @@ sub sortkey {
     return;
 }
 
+# Report missing cert /off-line host
+
+sub missingcert {
+    my( $host, $port, $type, $status, $note ) = @_;
+
+    my $cert = { host        => $host,
+                 port        => $port,
+                 renewbefore => 0,
+                 issuer      => '',
+                 subject     => '',
+                 start       => 0,
+                 end         => 0,
+                 days        => 0,
+                 d2r         => 0,
+                 status      => $status,
+                 key         => uc( $type->[1] ),
+                 klen        => '',
+               };
+    addnote( $cert, $note ) if( defined $note && length $note );
+    sortkey( $cert );
+    push @summary, $cert;
+    push @invalid, $cert;
+    return $cert;
+}
+
 sub analyzeChain {
     my( $host, $chain, $haskey, $opts, $at, $atl ) = @_;
 
@@ -608,7 +634,8 @@ sub checkhost {
         waitpid( $cpid, 0 ) if( $cpid && !$waitpid );
         if( $@ ) {
             die( "$@" ) unless( $@ eq "timeout!\n" );
-            printf STDERR ( "Unable to connect to $host (timeout)\n" );
+            printf STDERR ( "Unable to connect to $host (timeout)\n" ) if( $debug );
+            missingcert( $host, $port, $type, 'OFFLINE', "Connect timed out" );
             next;
         } else {
             seek( $chain, 0, SEEK_SET );
@@ -616,7 +643,8 @@ sub checkhost {
             $chain = <$chain>;
         }
         unless( defined $chain && length $chain ) {
-            printf STDERR ( "Unable to connect to $host\n" );
+            printf STDERR ( "Unable to connect to $host\n" ) if( $debug );
+            missingcert( $host, $port, $type, 'OFFLINE', "Connect failed" );
             next;
         }
         if( $chain =~ /\balert handshake failure\b/ || $? ) {
@@ -635,22 +663,11 @@ sub checkhost {
                     }
                 }
             }
-            my $cert = { host        => $host,
-                         port        => $port,
-                         renewbefore => 0,
-                         issuer      => '',
-                         subject     => '',
-                         start       => 0,
-                         end         => 0,
-                         days        => 0,
-                         d2r         => 0,
-                         status      => 'MISSING',
-                         key         => uc( $type->[1] ),
-                         klen        => '',
-                       };
-            sortkey( $cert );
-            push @summary, $cert;
-            push @invalid, $cert;
+            my $note =
+                  $chain =~ /\balert handshake failure\b/ ? "TLS handshake error"
+                : $? == -1                                ? "Execute: $!"
+                :                                           "exit: $?";
+            missingcert( $host, $port, $type, 'MISSING', $note );
             next;
         }
 
@@ -803,8 +820,10 @@ sub genHTML {
     push @tags, "<style>$nl$style</style>" if( $style );
     push @tags, '</head>', '<body>';
 
-    return \( join( $nl, @tags ) . ( ref $html ? $$html : $html ) .
-              join( $nl, q(</body> </html>) ) . $nl );
+    return \( join( $nl, @tags ) .
+              ( ref $html ? $$html : $html ) .
+              join( $nl, q(</body> </html>) ) .
+              $nl );
 }
 
 sub genMessage {
@@ -1562,7 +1581,7 @@ td.date {
   font-family: monospace;
   font-size: 110%;
 }
-td.expired,td.invalid, td.noverify, td.missing {
+td.expired,td.invalid, td.noverify, td.missing, td.offline {
   font-weight: bold;
   background-color: red;
   color: white;

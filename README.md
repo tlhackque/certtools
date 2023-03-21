@@ -30,8 +30,8 @@ Recent updates:
    - Under `Assets`, click a versioned tarball and corresponding signature link
     (Or download using a command line tool such as wget or curl)
     e.g. if the latest release is V2.1.2, you could obtain it with:
-    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz`
-    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig`
+    - `wget https://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz`
+    - `wget https://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig`
 
 ## getcert
 Get server's TLS certificate
