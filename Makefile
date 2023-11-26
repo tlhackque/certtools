@@ -221,5 +221,5 @@ tidy : $(ptools)
 .PHONY : shellcheck
 
 shellcheck: $(btools)
-	$(foreach tool,$(ptools),$(SHELLCHECK) $(tool);)
+	$(foreach tool,$(btools),$(SHELLCHECK) $(tool);)
 
