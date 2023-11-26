@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (C) 2017,2020 Timothe Litt, litt _at__ acm ddot org
+# Copyright (C) 2017,2020, 2023 Timothe Litt, litt _at__ acm ddot org
 #
 # Get SSL/TLS certificate from a server
 
@@ -21,6 +21,7 @@ OUTPUT=
 PROTO=
 FOUNDCERT=
 IDENT=
+IPVER=
 
 function version() {
     local ID="$1"
@@ -39,6 +40,8 @@ Usage: $SELF [-aCcdophs] server[:port]
  Version $(version "$VERSION")
 
  Options:
+  4             Only use IPv4
+  6             Only use IPv6
   a             Report all certificates (including intermediates)
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
@@ -71,8 +74,14 @@ EOF
     exit 1;
 }
 
-while getopts "aC:c:dhio:p:s:t:" opt; do
+while getopts "46aC:c:dhio:p:s:t:" opt; do
     case "$opt" in
+        4)
+            IPVER="-4"
+            ;;
+        6)
+            IPVER="-6"
+            ;;
         a)
             ALL="-showcerts"
             ;;
@@ -178,7 +187,9 @@ trap "exit_trap" EXIT
 exec 22>&2-
 exec 2>"$ERRS"
 
-cmd=("openssl" "s_client" "-connect" "$SERVER:$PORT" "-servername" "$SERVER")
+cmd=("openssl" "s_client")
+[ -n "$IPVER" ]          && cmd+=("$IPVER")
+cmd+=("-connect" "$SERVER:$PORT" "-servername" "$SERVER")
 [ -n "$CA" ]             && cmd+=("-CAfile" "$CA")
 [ -n "$ALL" ]            && cmd+=("$ALL")
 [ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (C) 2017, 2020, 2021, 2022 Timothe Litt <litt@acm.org>
+# Copyright (C) 2017, 2020, 2021, 2022, 2023 Timothe Litt <litt@acm.org>
 
 #shellcheck disable=SC2016
 VERSION='$Id$'
@@ -67,7 +67,9 @@ function hostcerts() {
     [ -z "$PORT" ] && PORT=443
     echo "$HOST:$PORT"
 
-    cmd=("openssl" "s_client" "-connect" "$HOST:$PORT" "-servername" "$HOST" "-showcerts")
+    cmd=("openssl" "s_client")
+    [ -n "$IPVER" ]          && cmd+=("$IPVER")
+    cmd+=("-connect" "$HOST:$PORT" "-servername" "$HOST" "-showcerts")
     [ -n "$CA" ]             && cmd+=("-CAfile" "$CA")
     [ "${#STARTTLS}" -gt 0 ] && cmd+=("${STARTTLS[@]}")
     [ "${#CTYPE}" -gt 0 ]    && cmd+=("${CTYPE[@]}")
@@ -127,6 +129,8 @@ Version $(version "$VERSION")
  "host" is a PEM filename
 
  Options:
+  4             Only use IPv4
+  6             Only use IPv6
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
   d: file       Debug information to file
@@ -152,6 +156,7 @@ EOF
 
 # Process options
 
+IPVER=
 CTYPE=
 STARTTLS=
 PROTO=
@@ -160,10 +165,17 @@ CA="$SSL_CERT_FILE"
 [ -z "$CA" ] && CA="/etc/pki/tls/certs/ca_bundle.pem"
 DEBUG=
 HOSTS=
+# shellcheck disable=SC2209
 QUICK=cat
 
-while getopts "C:c:d:f:hQs:t:" opt; do
+while getopts "46C:c:d:f:hQs:t:" opt; do
     case "$opt" in
+        4)
+            IPVER="-4"
+            ;;
+        6)
+            IPVER="-6"
+            ;;
         C)
             CA="$OPTARG"
             ;;
