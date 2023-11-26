@@ -30,8 +30,8 @@ Recent updates:
    - Under `Assets`, click a versioned tarball and corresponding signature link
     (Or download using a command line tool such as wget or curl)
     e.g. if the latest release is V2.1.2, you could obtain it with:
-    - `wget https://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz`
-    - `wget https://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig`
+    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz`
+    - `wget htps://github.com/tlhackque/certtools/releases/download/V2.1.2/certtools-2.1.2.tar.xz.sig`
 
 ## getcert
 Get server's TLS certificate
@@ -40,9 +40,11 @@ Get server's TLS certificate
 Usage: getcert [-aCcdophs] server[:port]
 
  Get SSL/TLS certificate from server & output as PEM
- Version 36ab-8160-ed52-2987
+ Version 384b-0959-e2d9-130d
 
  Options:
+  4             Only use IPv4
+  6             Only use IPv6
   a             Report all certificates (including intermediates)
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
@@ -78,7 +80,7 @@ See LICENSE for license.
 Usage: ssl_info [-C bundle] [-c type] [-s proto] [-t tlsver] [host[: port]]
 
 Display basic certificate information from a server or file
-Version af5b-3183-6fb8-d9d1
+Version 7f6a-7300-667f-7641
 
  If no host is specified, a file containing a list of hosts to query may
  my specified with -f.  This contains lines HOST [PORT] or HOST[:PORT].
@@ -87,10 +89,13 @@ Version af5b-3183-6fb8-d9d1
  "host" is a PEM filename
 
  Options:
+  4             Only use IPv4
+  6             Only use IPv6
   C: bundle     CA bundle file for verification
   c: type       Type of certificate to request (dual certificate hosts)
   d: file       Debug information to file
   f: file       File listing hosts to query
+  Q             Quick display of issue, expiration dates, keytype & size (only)
   s: proto      STARTTLS for proto: one of smtp, pop3, imap, ftp
   t: tlsver     TLS version: ssl, 1, 1.1, 1.2, 1.3
 
