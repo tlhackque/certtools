@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
 # Net::DNS requires at least 5.8.9
 
@@ -7,7 +7,7 @@ use 5.10.0;
 our $VERSION = '$Id$';
 
 my $copyright = << 'COPYRIGHT';
-Copyright (C) 2021-2023 Timothe Litt <litt at acm.org>
+Copyright (C) 2021-2024 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
@@ -15,34 +15,138 @@ use warnings;
 use strict;
 
 use File::Basename;
-use Getopt::Long( qw/:config bundling/ );
+use Getopt::Long( qw/GetOptionsFromString :config bundling/ );
 use Net::DNS;
+use Text::Abbrev;
 
 sub checkZone;
 sub removeRecord;
+sub generateCnames;
+sub addRecord;
+sub getMname;
+sub getRresolver;
+sub getUresolver;
 sub indent;
-sub cleandiemsg;
+sub cleanDieMsg;
 
 my $self = basename( $0 );
 
-my( $debug,   @domains, @ns, $lib, $recurse, $remove, $srcaddr, $tsig, $unsigned,
-    $verbose, $view,
+use constant { STS_ZXFR    => 1, STS_TOKEN => 2,  STS_REFUSED  => 4,
+               STS_NOREPLY => 8, STS_CNAME => 16, STS_IREFUSED => 32, STS_INOREPLY => 64,
+               STS_SOA     => 128 };
+
+my( $debug,   @cnames,  $czone,  $hash,    $install, $lib,     $named, @ns,  $port,
+    $recurse, $rectype, $remove, $reverse, $srcaddr, $srcport, $tsig,  $ttl, $verbose,
+    $view,    $unique,
     $help,    $man, $version );
 
+use constant { REC_TXT => 1, REC_CNAME => 2 };
+my %recval = ( none => 0, '' => REC_TXT, txt => REC_TXT, cnames => REC_CNAME,
+               both => REC_TXT | REC_CNAME );
+my %recarg = abbrev( keys %recval );
+
+sub setrec {
+    my( $var, $name, $value ) = @_;
+    my $val = lc $value;
+
+    die( "Invalid value '$value' for --$name\n" )
+        unless( exists $recarg{$val} && defined( $$var = $recval{ $recarg{$val} } ) );
+}
+
+# Options parsed before init file is read and removed from @ARGS.
+# Influence init file choice/processing.  Included in @opts for uniqueness checks
+
+my( $initfile, $tag );
+my @preopts = (
+        "debug|d!"                => \$debug,
+        "init-file|i=s"           => \$initfile,
+        "no-init-file|noinitfile" => sub { $initfile = ''; },
+        "option|tag|o=s"          => \$tag,
+        "verbose|v!"              => \$verbose,
+              );
+
+# Options parsed both in init file and on command line
+my @opts = (
+        @preopts,
+        "cnames-for:s"                     => \@cnames,
+        "display|D:s"                      => sub { setrec( \$rectype, @_ ); },
+        "hash-cnames:i"                    => \$hash,
+        "no-hash-cnames|nohash-cnames"     => sub { undef $hash },
+        "install!"                         => \$install,
+        "named-address=s"                  => \$named,
+        "no-named-address|nonamed-address" => sub { $named = ''; },
+        "nameservers|n=s"                  => \@ns,
+        "no-nameservers|nonameservers"     => sub { @ns = (); },
+        "ns-port=i"                        => \$port,
+        "recurse!"                         => \$recurse,
+        "remove|r:s"                       => sub { setrec( \$remove, @_ ); },
+        "no-remove|noremove|keep|R"        => sub { $remove = 0; },
+        "reverse-zones!"                   => \$reverse,
+        "source-address|s=s"               => \$srcaddr,
+        "source-port=i"                    => \$srcport,
+        "target-zone=s"                    => \$czone,
+        "tsig-key|k=s"                     => \$tsig,
+        "no-tsig-key|notsig-key"           => sub { undef $tsig; },
+        "ttl-for-cnames=i"                 => \$ttl,
+        "unique-cnames!"                   => \$unique,
+        "view|V=s"                         => \$view,
+           );
+
+# Handle any init file
+
+Getopt::Long::Configure( qw/pass_through/ );
+GetOptions( @preopts ) or
+    die( "Failed to parse option\n" );
+Getopt::Long::Configure( qw/nopass_through/ );
+
+my @initfiles = defined $initfile ? ( $initfile ) : (
+        $ENV{ACME_TOKEN_CHECK},
+        "./.${self}",
+        defined $ENV{HOME} ? "$ENV{HOME}/.${self}" : (),
+        "/etc/${self}.conf" );
+
+for( my $i = 0; $i <= $#initfiles; ++$i ) {
+    my $initfile = $initfiles[$i];
+    if( defined $initfile && length $initfile && open( my $ini, '<', $initfile ) ) {
+        if( $debug || $verbose ) {
+            if( defined $tag ) {
+                printf( "Initializing from %s using tag '%s'\n", $initfile, $tag );
+            } else {
+                printf( "Initializing from %s\n", $initfile );
+            }
+        }
+        my $inicmd = '';
+        while( <$ini> ) {
+            s/#.*$//;
+            if( s/^\s*([\w.-]+)\s*:// ) {
+                next unless( defined $tag && $tag eq $1 );
+            } else {
+                next if( defined $tag );
+            }
+            $inicmd .= $_;
+        }
+        close $ini;
+        die( "No option lines found with tag '$tag' in $initfile\n" )
+            if( defined $tag && !length $inicmd );
+        printf( "Lines matching tag: %u\n%s\n", $inicmd =~ tr/\n//, $inicmd )
+            if( defined $tag && $debug );
+        my( $inif, $tg )   = ( $initfile, $tag );
+        my( $rv,   $args ) = GetOptionsFromString( $inicmd, @opts );
+        ( $initfile, $tag ) = ( $inif, $tg );
+        die( "Error parsing $initfile\n" ) unless( $rv );
+        unshift @ARGV, @$args;
+        last;
+    }
+    die( "$initfile: open failed: $!\n" )
+        if( $i == 0 && defined $initfile && length $initfile );
+}
+
+# Command line - @preopts have been removed from @ARGS
 GetOptions(
-        "debug|d!"           => \$debug,
-        "library=s"          => \$lib,
-        "nameservers|n=s"    => \@ns,
-        "recurse!"           => \$recurse,
-        "remove|r!"          => \$remove,
-        "source-address|s=s" => \$srcaddr,
-        "tsig-key|k=s"       => \$tsig,
-        "unsigned|u!"        => \$unsigned,
-        "verbose|v!"         => \$verbose,
-        "view|V=s"           => \$view,
-        'help|?|h'           => \$help,
-        'man'                => \$man,
-        'version'            => \$version,
+        @opts,
+        'help|?|h' => \$help,
+        'man'      => \$man,
+        'version'  => \$version,
           ) or die( "Command line error, --help for usage\n" );
 if( $help || $man ) {
     eval {
@@ -61,62 +165,127 @@ if( $version ) {
     exit;
 }
 
-$recurse = 1 unless( defined $recurse );
+if( defined $rectype ) {
+    $remove ||= 0;
+    $rectype |= $remove;
+} elsif( defined $remove ) {
+    $rectype = $remove;
+} else {
+    $rectype = REC_TXT;
+    $remove  = 0;
+}
+
+$hash    = 32      if( defined $hash && $hash <= 0 );
+$hash    = 63      if( defined $hash && $hash > 63 );
+$unique  = 1       unless( defined $hash || defined $unique );
+$unique ||= $hash;
+$recurse = 1       unless( defined $recurse );
+$port    = 53      unless( defined $port );
+$srcport = 0       unless( defined $srcport );
+$ttl     = 30 * 60 unless( defined $ttl );
 @ns      = split( /, ?/, join( ',', @ns ) );
+@cnames  = split( /, ?/, join( ',', @cnames ) );
 
-# Use PerlLib if any argument needs it to obtain a default value.
-# PerlLib is not released to the public, but is not required..
+# Get a list of zones from named's statistics channel if specified & no command line zones
 
-unless(    @ARGV
-        && ( $unsigned || ( defined $tsig && length $tsig ) )
-        && @ns ) {
-    $lib = "/var/www/PerlLib" unless( defined $lib );
-    unshift( @INC, $lib );
-    eval {
-        require TL::DNS::Hostinfo;
-        require TL::NetConfig;
-    };
-    $! = 255;
-    die( "A domain, --nameserver, and --tsig-key or --unsigned must be specified\n" )
-        if( $@ );
-    no warnings 'once';
+if( !@ARGV && $named ) {
+    require LWP::Simple;
+    require JSON;
 
-    @ARGV = ( grep { $_ !~ /(?:\.arpa|^localhost)\.$/ } keys %TL::NetConfig::domains )
-        unless( @ARGV );
-    unless( $unsigned || ( defined $tsig && length $tsig ) ) {
-        $view = 'external' unless( defined $view );
-        $tsig = $TL::NetConfig::dnsKeyFiles{$view};
-        die( "Unknown view \"$view\"\n" ) unless( defined $tsig && length $tsig );
-    }
+    my $url = "${named}/json/v1/zones";
+    $url = "http://$url" unless( $url =~ m,^https?://, );
+    my $cfg = LWP::Simple::get( $url ) or
+        die( "Unable to read named statistics channel from $url\n" );
+    die( "No response from named statisticas channel at $url\n" ) unless( length $cfg );
+    $cfg = JSON->new->utf8->decode( $cfg );
+    die( "Unknown format from named statistics channel at $url\n" )
+        unless( exists $cfg->{'json-stats-version'}
+                && $cfg->{'json-stats-version'} =~ /^1\.(\d+)/ );
+    $view = '_default' unless( defined $view );
+    die( "view $view not present in named statistics from $url\n" )
+        unless( exists $cfg->{views}{$view} );
+    my @zones = map { ( $_->{type} eq 'master' ) ? $_->{name} : () }
+        @{ $cfg->{views}{$view}{zones} };
+    @ARGV = @zones;
 }
 
 # %zones: 1 = In domain list  2 = processed
 
-my %zones   = map { $_ .= '.' unless( /\.$/ ); ( $_ => 1 ) } @ARGV;
+my %zones;
+
+@ARGV = grep { !/\.(?:in-addr|ip6)\.arpa\.?$/ } @ARGV unless( $reverse );
+
+foreach( @ARGV ) {
+    $_ .= '.' unless( /\.$/ );
+    $zones{$_} = 1;
+}
 my $found   = 0;
+my $cfound  = 0;
 my $removed = 0;
 my $sts     = 0;
-
 my $res = Net::DNS::Resolver->new( recurse        => 0,
-                                   persistent_tcp => 1,
-                                   persistent_udp => 1,
+                                   persistent_tcp => 0,
+                                   persistent_udp => 0,
+                                   port           => $port,
+                                   srcport        => $srcport,
                                    defnames       => 0,
                                    dnsrch         => 0,
                                    debug          => $debug,
                                  );
+my( $rres, $ures );
+
 $res->srcaddr( $srcaddr ) if( defined $srcaddr && length $srcaddr );
-unless( $unsigned ) {
+if( defined $tsig ) {
     eval { $res->tsig( $tsig ); };
     if( $@ ) {
-        printf( "TSIG: %s\n", cleandiemsg( $@ ) );
+        printf( "TSIG: %s\n", cleanDieMsg( $@ ) );
         exit 255;
     }
 }
 
-$found += checkZone( $res, shift @ARGV ) while( @ARGV );
+if( @cnames || $czone ) {
+    die( "Specify target zone for CNAMEs with --target-zone" )
+        unless( defined $czone && length $czone );
+    if( $unique && $hash ) {
+        require Digest::SHA;
+        eval {
+            require Math::Random::Secure;
+            Math::Random::Secure->import( 'rand' );
+            rand( 5 );
+        };
+    }
+    my $created = 0;
+    @cnames = '.' unless( @cnames );
+    my %cn = map { s/[.*]$//; $_ .= '.' if( length ); ( $_ => 1 ) } @cnames;
+    @cnames = keys %cn;
+    $czone .= '.' unless( $czone =~ /\.$/ );
 
-if( $verbose || $found ) {
-    printf( "%u acme challenge %s found\n", $found, $found == 1 ? 'record' : 'records' );
+    foreach my $zone ( keys %zones ) {
+        my $nc = generateCnames( $zone, $czone );
+        $created += $nc;
+    }
+    printf( "%u acme challenge %s %s\n", $created,
+            $created == 1 ? 'cname'     : 'cnames',
+            $install      ? 'installed' : 'generated' );
+    exit $sts;
+}
+
+die( "--install is only used when generating CNAME redirects.  Use --target-zone\n" )
+    if( $install );
+die( "--hash is only used when generating CNAME redirects.  Use --target-zone\n" )
+    if( $hash );
+
+while( @ARGV ) {
+    my( $nf, $nc ) = checkZone( $res, shift @ARGV );
+    $found  += $nf;
+    $cfound += $nc;
+}
+
+if( $verbose || $found || $cfound ) {
+    printf( "%u acme challenge %s found\n", $found, $found == 1 ? 'token' : 'tokens' )
+        if( $rectype & REC_TXT );
+    printf( "%u acme challenge %s found\n", $cfound, $cfound == 1 ? 'cname' : 'cnames' )
+        if( $rectype & REC_CNAME );
     printf( "%u acme challenge %s removed\n", $removed,
             $removed == 1 ? 'record' : 'records' )
         if( $remove );
@@ -128,17 +297,33 @@ exit $sts;
 sub checkZone {
     my( $res, $zone ) = @_;
 
-    my $nf = 0;
-    return $nf if( $zones{$zone} & 2 );  # Process only oncce
+    my( $nf, $nc ) = ( 0, 0 );
+    return ( $nf, $nc ) if( $zones{$zone} & 2 );  # Process only oncce
     $zones{$zone} |= 2;
+    return ( $nf, $nc ) if( $zone =~ /\.(?:in-addr|ip6)\.arpa\.?$/ && !$reverse );
+
     printf( "Checking %s\n", $zone ) if( $verbose );
 
     $@ = '';
-    my $ns = @ns ? [@ns] : eval { TL::DNS::Hostinfo::getDNSserverList( $zone ) };
+
+    my( $mname, $ns );
+    if( @ns ) {
+        $ns = [@ns];
+    } else {
+        getRresolver unless( $rres );
+        my %ns;
+        $ns = $rres->query( $zone, 'NS' );
+        if( $ns ) {
+            foreach my $n ( $ns->answer ) {
+                $ns{ lc $n->nsdname . '.' } = 1 if( lc $n->name . '.' eq lc $zone );
+            }
+        }
+        $ns = [ sort keys %ns ];
+    }
     unless( $ns && @$ns ) {
         printf( "Checking %s\n", $zone ) unless( $verbose );
-        printf( "  ... skipping %s: %s\n", $zone, cleandiemsg( $@ ) || "No nameservers" );
-        return $nf;
+        printf( "  ... skipping %s: %s\n", $zone, cleanDieMsg( $@ ) || "No nameservers" );
+        return ( $nf, $nc );
     }
     if( $verbose ) {
         printf( "  ... using NS" );
@@ -149,43 +334,61 @@ sub checkZone {
 
     my $it = eval { return $res->axfr( $zone, 'IN' ) };
     if( $@ || !$it ) {
-        $sts |= 1;
+        $sts |= STS_ZXFR;
         printf( "Checking %s\n", $zone ) unless( $verbose );
         printf( "  Zone transfer failed: %s\n%s\n", $res->errorstring,
-                indent( 2, cleandiemsg( $@ ) ) );
-        return $nf;
+                indent( 2, cleanDieMsg( $@ ) ) );
+        return ( $nf, $nc );
     }
     while( my $rr = eval { $it->() } ) {
         my $rtype = $rr->type;
         if( $rtype eq 'NS' ) {
             if( $recurse ) {
                 my $owner = $rr->owner . '.';
+                next if( $owner =~ /\.(?:in-addr|ip6)\.arpa\.$/ && !$reverse );
                 unless( $zones{$owner} ) {  # Not seen previously
                     unshift @ARGV, $owner;
                     $zones{$owner} = 1;
                 }
             }
-        } elsif( $rtype eq 'TXT' && $rr->owner =~ /^_acme-challenge\./i ) {
-            $sts |= 2;
-            printf( "Checking %s\n", $zone ) unless( $nf++ || $verbose );
+        } elsif(    $rectype & REC_TXT
+                 && $rtype eq 'TXT'
+                 && $rr->owner =~ /^_acme-challenge\./i ) {
+            $sts |= STS_TOKEN;
+            printf( "Checking %s\n", $zone ) unless( $nf++ || $nc || $verbose );
             printf( "  Found %s\n",  $rr->plain );
-            removeRecord( $res, $zone, $rr ) if( $remove );
+            $removed += removeRecord( $mname, $zone, $rr ) if( $remove & REC_TXT );
+        } elsif(    $rectype & REC_CNAME
+                 && $rtype eq 'CNAME'
+                 && $rr->owner =~ /^_acme-challenge\./i ) {
+            $sts |= STS_CNAME;
+            printf( "Checking %s\n", $zone ) unless( $nc++ || $nf || $verbose );
+            printf( "  Found %s\n",  $rr->plain );
+            $removed += removeRecord( $mname, $zone, $rr ) if( $remove & REC_CNAME );
+        } elsif( $rtype eq 'SOA' ) {
+            $mname = $rr->mname . '.';
         }
     }
     if( $@ ) {
-        $sts |= 1;
+        $sts |= STS_ZXFR;
         printf( "Checking %s\n", $zone ) unless( $nf || $verbose );
         printf( "  Zone transfer incomplete: %s\n%s\n", $res->errorstring,
-                indent( 2, cleandiemsg( $@ ) ) );
-        return $nf;
+                indent( 2, cleanDieMsg( $@ ) ) );
+        return ( $nf, $nc );
     }
-    return $nf;
+    return ( $nf, $nc );
 }
 
-# Remove a stray TXT RR
+# Remove a stray TXT or CNAME RR
 
 sub removeRecord {
-    my( $res, $zone, $rr ) = @_;
+    my( $mname, $zone, $rr ) = @_;
+
+    unless( $mname ) {
+        return 0 unless( getMname( $mname, $zone ) );
+        $_[0] = $mname;
+    }
+    getUresolver( $mname );
 
     my $upd = Net::DNS::Update->new( $zone, $rr->class );
     $upd->push( prereq =>
@@ -197,21 +400,178 @@ sub removeRecord {
         my $s = $upd->string;
         print( indent( 4, $upd->string ) );
     }
-    my $r = $res->send( $upd );
+    my $r = $ures->send( $upd );
     if( $r && $r->header->rcode eq 'NOERROR' ) {
-        ++$removed;
         printf( "    Removed\n" );
-    } else {
-        if( $r ) {
-            $sts |= 4;
-            printf( "    Remove failed: %s from %s\n", $r->header->rcode, $r->from );
-        } else {
-            $sts |= 8;
-            printf( "    Update failed: %s from %s\n", $res->errorstring, $r->from );
-        }
-        print( indent( 4, $upd->string, $r->string ) ) unless( $debug );
+        return 1;
     }
-    return;
+    if( $r ) {
+        $sts |= STS_REFUSED;
+        printf( "    Remove failed: %s from %s\n", $r->header->rcode, $r->from );
+    } else {
+        $sts |= STS_NOREPLY;
+        printf( "    Update failed: %s from %s\n", $res->errorstring, $r->from );
+    }
+    print( indent( 4, $upd->string, $r->string ) ) unless( $debug );
+    return 0;
+}
+
+# Generate CNAMEs for a zone
+
+sub generateCnames {
+    my( $zone, $target ) = @_;
+
+    next if( $zone =~ /\.(?:in-addr|ip6)\.arpa\.?$/ && !$reverse );
+
+    my $mname;
+    my $ic = 0;
+    foreach my $c ( @cnames ) {
+        my $zid = '';
+        if( $unique ) {
+            if( $hash ) {
+                $zid = substr(
+                           Digest::SHA::sha256_hex( $zid . int( rand( 2_000_000_000 ) ) ),
+                           0, $hash ) .
+                    '.';
+            } else {
+                $zid = "${c}${zone}";
+            }
+        }
+        my $rr = Net::DNS::RR->new( name  => "_acme-challenge.${c}${zone}",
+                                    ttl   => $ttl,
+                                    type  => 'CNAME',
+                                    cname => "_acme-challenge.${zid}${target}" );
+
+        if( $install ) {
+            printf( "Install: %s\n", $rr->plain );  # if( $debug );
+            $ic += addRecord( $mname, $zone, $rr );
+        } else {
+            printf( "%s\n", $rr->plain );
+            ++$ic;
+        }
+    }
+    return $ic;
+}
+
+# Add a record, potentially deleting record of the "other" type
+
+sub addRecord {
+    my( $mname, $zone, $rr ) = @_;
+
+    die( "addRecord called for non-ACME challenge\n" )
+        unless( $rr->owner =~ /^_acme-challenge\./ );
+
+    unless( $mname ) {
+        return 0 unless( getMname( $mname, $zone ) );
+        $_[0] = $mname;
+    }
+    getUresolver( $mname );
+
+    my $upd = Net::DNS::Update->new( $zone, $rr->class );
+    if( $rr->type eq 'CNAME' ) {
+
+        #$upd->push( prereq => # Standard CNAME check for conflicts
+        #        nxdomain( sprintf( '%s. 0', $rr->owner ) ) );
+        $upd->push( update =>
+                    rr_del( sprintf( '%s 0 %s %s', $rr->owner, $rr->class, 'TXT' ) ) );
+    } else {
+
+        #$upd->push( prereq =>
+        #            nxrrset( sprintf( '%s. 0 %s', $rr->owner, 'CNAME' ) ) );
+        $upd->push( update =>
+                    rr_del( sprintf( '%s 0 %s %s', $rr->owner, $rr->class, 'CNAME' ) ) );
+    }
+    $upd->push( update => rr_add( $rr->string ) );
+
+    if( $debug ) {
+        printf( "    Adding\n" );
+        my $s = $upd->string;
+        print( indent( 4, $upd->string ) );
+    }
+    my $r = $ures->send( $upd );
+    if( $r && $r->header->rcode eq 'NOERROR' ) {
+        printf( "    Added\n" );
+        return 1;
+    }
+    if( $r ) {
+        $sts |= STS_IREFUSED;
+        printf( "    Add failed: %s from %s\n", $r->header->rcode, $r->from );
+    } else {
+        $sts |= STS_INOREPLY;
+        printf( "    Update failed: %s from %s\n", $res->errorstring, $r->from );
+    }
+    print( indent( 4, $upd->string, $r->string ) ) unless( $debug );
+
+    return 0;
+}
+
+# Get the mname of a zone
+
+sub getMname {
+    my( $mname, $zone ) = @_;
+
+    getRresolver unless( $rres );
+    my $soa = $rres->query( $zone, 'SOA' );
+    my @ans;
+    unless( $soa && ( @ans = $soa->answer ) ) {
+        $sts |= STS_SOA;
+        print( "Unable to obtain SOA for $zone\n" );
+        return 0;
+    }
+    $mname = $_[0] = $ans[0]->mname . '.';
+    return 1;
+}
+
+# Initialize the recursive resolver
+
+sub getRresolver {
+    return $rres if( $rres );
+    $rres = Net::DNS::Resolver->new( recurse        => 1,
+                                     persistent_tcp => 0,
+                                     persistent_udp => 0,
+                                     port           => $port,
+                                     srcport        => $srcport,
+                                     defnames       => 0,
+                                     dnsrch         => 0,
+                                     debug          => $debug,
+                                   );
+    $rres->srcaddr( $srcaddr ) if( defined $srcaddr && length $srcaddr );
+    if( defined $tsig ) {
+        eval { $rres->tsig( $tsig ); };
+        if( $@ ) {
+            printf( "TSIG: %s\n", cleanDieMsg( $@ ) );
+            exit 255;
+        }
+    }
+    return $rres;
+}
+
+# Return an Update resolver
+
+sub getUresolver {
+    my( $mname ) = @_;
+
+    unless( $ures ) {
+        $ures = Net::DNS::Resolver->new( recurse        => 1,
+                                         persistent_tcp => 0,
+                                         persistent_udp => 0,
+                                         port           => $port,
+                                         srcport        => $srcport,
+                                         defnames       => 0,
+                                         dnsrch         => 0,
+                                         debug          => $debug,
+                                       );
+        $ures->srcaddr( $srcaddr ) if( defined $srcaddr && length $srcaddr );
+        if( defined $tsig ) {
+            eval { $ures->tsig( $tsig ); };
+            if( $@ ) {
+                printf( "TSIG: %s\n", cleanDieMsg( $@ ) );
+                exit 255;
+            }
+        }
+    }
+    $ures->nameservers( $mname );
+    return $ures;
 }
 
 # Indent a string
@@ -226,7 +586,7 @@ sub indent {
 
 # Remove the traceback information from an exception message
 
-sub cleandiemsg {
+sub cleanDieMsg {
     my( $msg ) = @_;
 
     $msg =~ s/\A(.*?) at .*\Q$self\E line \d+\.\Z/$1/s unless( $debug );
@@ -247,54 +607,139 @@ acme_token_check - check DNS domain(s) for stray ACME tokens
 acme_token_check [options] [domain ...]
 
   Options
-    --debug           --library   --nameservers  --recurse  --remove
-    --source-address  --tsig-key  --unsigned     --verbose  --view
-    --help            --man       --version
+    --debug       --named-address  --nameservers  --ns-port --recurse
+    --option      --init-file      --remove       --source-address
+    --tsig-key    --source-port    --verbose      --view    --display
+    --cnames-for  --target-zone    --hash         --install
+    --help        --man            --version
 
-If no domain is specified, all domains in F<%TL::Netconfig::domains> are checked,
-except for any in F<.arpa> or F<localhost>.
+If no domain is specified, domains can be obtained from F<named> if its statistics
+channel is available.
 
 =head1 OPTIONS
 
 =over 8
 
+=item B<--cnames-for>=I<source>
+
+List of source [sub-]domains for CNAME redirection from each domain.
+
+E.g. F<www,host1,host2> or F<*> for wildcard.
+
+Do not include the parent domain name.
+
+Use '.' to specify the domain itself.  "*" is an alias for '.' for
+the purposes of ACME wildcard validation.
+
 =item B<-d> B<--[no]debug>
 
 Display debugging output from DNS queries.
 
-=item B<--library>=I<path>
+=item B<-D> B<--display>=I<txt|cnames|both>
 
-Library path for PerlLib modules.
+Display all records found of the specified type(s).  Default is TXT.
+
+Records of the type(s) being removed are always displayed.
+
+=item B<--hash>[=I<n>]
+
+When generating CNAMEs, include a hash of the source domain in the target
+instead of the source domain itself.  This ensures that all the target names
+are a fixed length, but prevents backtracking from a stranded token to the
+client.  I<n> is the length of the hash (in characters) used in the target
+domain name.  A random factor makes each re-generation unique.
+
+If not specified, hashing is not used.  If I<n> is omitted, 32 is used.
+I<n> must be less than 64, since the hash is a single DNS label.
+
+=item B<--install>
+
+When generating CNAMEs, install them with DNS UPDATE.
+
+=item B<--named-address>=I<address[:port]>
+
+Use a F<named> statistics channel to obtain a list of zones to process.
+The address can be a literal address or a hostname.  It may be prefixed
+by F<https://> if F<named> is behind an https proxy.  The default
+protocol is F<http://>, port 80.
+
+Not accessed if any domain name(s) specified on the command line.
 
 =item B<--nameservers>-I<addr,...>
 
-Name(s) and/or Address(es) of nameservers to use.
+Name(s) and/or Address(es) of nameservers to use.  If not specified, the
+default resolvers will be used to obtain the zone's NS records.
+
+The B<tsig-key> and/or B<source-address> will be used for this query.
+
+Updates (to remove records) are always sent to the B<SOA>'s I<mname>.
+
+=item B<--ns-port>=I<port>
+
+Destination port of nameservers.  Use if nameservers listen on a non-standard port
+(e.g. test nameservers).
+
+Default is 53.
 
 =item B<--[no]recurse>
 
-Process delegations (subzones) of the specified domains.  Default is B<--recurse>,
+Scan delegations (subzones) of the specified domains.  Default is B<--recurse>,
 
-=item B<-r> B<--[no]remove>
+Not applicable to CNAME generation.
 
-Remove all records found.  Default is B<--noremove>.
+=item B<-r> B<--[no]remove>=I<none|txt|cnames|both>
+
+Remove all records found of the specified type(s).  Default type for B<--remove> is I<txt>.
+
+Requires the nameserver hosting a zone to support and permit dynamic updates (RFC2136).
+The nameserver may require updates to be from a specified address (or subnet) and/or port,
+or to be TSIG-signed.
+
+Removing I<cnames> is not common; they are usually a static delegation.
+
+Default if not specified is B<--noremove>.
+
+=item B<--reverse-zones>
+
+Process zones in the F<in-addr.arpa> and F<ip6.arpa> domains.
+
+Default is B<--no-reverse-zones>.
 
 =item B<-s> B<--source-address>=I<address>
 
 Send queries from I<address>.  Default is any local address.
 
+=item B<--source-port>=I<port>
+
+Send queries from I<port>.  Default is any local port.
+
+=item B<--target-zone>=I<updatable.domain>
+
+Specifies the target of generated CNAME records.  This must be a domain that
+can be updated during ACME verification.
+
 =item B<-k> B<--tsig-key>=I<file>
 
 Specify a file containing TSIG key to use for the domain(s).
 
-Default is to use the 'external' key specified in F<TL::NetConfig>.
+The default is not to sign queries or updates.
 
-=item B<-u> B<--unsigned>
+=item B<--[no]unique-names>
 
-Do not sign queries or updates with TSIG.
+When generating CNAMEs, with B<--unique> each CNAME on a host covered by the
+certificate targets a unique name on the target validation server.  The target
+name either includes the full domain name of the client certificate, or a
+hash of that name and a random factor.  See B<--hash> for information about the
+latter.
 
 =item B<-V> B<--view>=I<name>
 
-Specify view to be used if B<--tsig-ky> is defaulted.
+Specify view to be used when obtaining zone list with B<--named-address>.
+
+View selection used for queries (and updates) may be influenced by B<--tsig-key>
+and/or B<--source-address>, depending on the nameserver.
+
+The default is to use the B<_default> view.
 
 =item B<-v> B<--[no]verbose>
 
@@ -314,8 +759,8 @@ Print the manual page and exit.
 
 =head1 DESCRIPTION
 
-B<acme_token_check> scans the specified domain(s) and any subdomains for B<TXT> records
-of the form:
+B<acme_token_check> scans the specified domain(s) and any subdomains for B<TXT>
+and/or B<CNAME> records of the form:
 
     _acme-challenge.*
 
@@ -323,23 +768,32 @@ With B<--verbose> tnose found will be reported.
 
 With B<--remove>, those found will be removed from the DNS.
 
-These records are created when the ACME protocol is used to obtain TLS certificates.,
+With B<--target-zone>, creates CNAME records for verification redirection.
+
+These records are created when the ACME protocol is used to obtain TLS certificates,
 validating domain ownership with its I<DNS-01> option.
 
-They should be removed, but system or software failures can leave them in the DNS.
+The B<TXT> records should be removed, but system or software failures can leave them in the DNS.
 
 B<acme_token_check> performs a zone transfer (AXFR) in order to locate the
-text records.  If requested, it uses DNS UPDATE to remove them.  The nameserver
-must be configured to permit these transactions.
+B<TXT> and/or B<CNAME> records.  If requested, it uses DNS UPDATE to remove B<TXT>
+and to install B<CNAME> records.  The nameserver(s) must be configured to permit these
+transactions.
 
 When run at a time that no renewals are active, B<acme_token_check> provides a means
-to detect and remove leftover challenge records.  By default, it only generates output
+to detect and remove leftover challenge tokens.  By default, it only generates output
 if records are found or errors are encountered, making it suitable for a I<cron> job.
 Such I<cron> jobs should be scheduled when they will not interfere with certificate
 renewals.
 
-Communications with the nameserver are signed with TSIG unless B<--unsigned> is
-specified.  B<--unsigned> communications are adequate when TSIG is not used for
+B<acme_token_check> can also scan for corresponding B<CNAME> records, which are used
+to redirect challenges to a dynamically-updatable domain.  These are usually static,
+and should not be removed.
+
+=head2 SECURITY
+
+Communications with the nameserver are signed with TSIG if B<--tsig> is
+specified.  Unsigned communications are adequate when TSIG is not used for
 view selection, zone transfer authentication, or update authentication.
 
 If TSIG is not used, the nameserver is presumed to handle any view selection,
@@ -347,9 +801,112 @@ and authentication based on IP address.  In this case, if the host running
 B<acme_token_check> is multi-homed, B<--source-address> can be used to ensure
 that transactions use an authorized address to communicate with the DNS servers.
 
-B<PerlLib> is a non-public library.  It is not required if a domain, B<--nameserver>
-and B<--tsig-key> (or B<--unsigned>) are specified.  Otherwise, B<acme_token_check> will
-try to load modules from PerlLib to obtain defaults for these options.
+=head2 CHALLENGE REDIRECTION (CNAMES)
+
+ACME issuer verification reaquires that the client have the ability to deposit challenge
+tokens in the certificate's domain to prove ownership.  There are scenarios where,
+due to security concerns, operational issues, or technical limitations, this is
+inconvenient (or impossible).  To accomodate these scenarios, issuers may follow
+CNAMEs for the challenge tokens to a server where the tokens can be installed, usually
+by a form of dynamic update.  The CNAMEs are created in the certificate's domain, and
+are static thereafter.
+
+B<acme_token_check> can generate these CNAMEs using the B<--cnames-for> and B<--target-zone> options.
+The target will include a hash of the source domain, or the source domain name.  See B<--hash>.
+
+Installation is generally manual, but if the domain supports dynamic updates, you can use B<--install>.
+This is used when the certificate's domain restricts updates to designated people, who can
+nonetheless benefit from B<acme_token_check>'s automation.
+
+=head2 INITIALIZATION FILES
+
+If the environment variable F<ACME_TOKEN_CHECK> is defined, the file that it points to
+is parsed before the command line.  It may contain options and/or domains.
+Otherwise, B<acme_token_check> looks for<.acme_token_check> in F<.>,  F<$HOME>, and
+also for  F</etc/acme_token_check.conf>.
+The first file found will be processed.  # comments are allowed.
+
+B<--init-file> specifies an initialization file to be used, and disables the automatic
+search for F<.acme_token_check>.
+
+B<--option>=I<tag> specifies that only lines matching the I<tag> are to be used.
+Tags consist of a word followed by ':' at the beginning of a line.  Default is to
+process only untagged lines.
+
+These options are ignored in initialization files.
+
+=head1 EXAMPLES
+
+Scan example.com (and all sub-domains) for tokens:
+
+    acme_token_check example.com
+
+Scan and delete:
+
+    acme_token_check example.com --remove
+
+Scan for CNAMEs (redirections)
+
+    acme_token_check example.com --display=cnames
+
+Scan and delete (remove implies display)
+
+    acme_token_check example.com --remove=cnames
+
+Generate the CNAME targeting dns.example.net for a wildcard certificate on host.example.com
+
+     acme_token_check host.example.com --target=dns.example.net --cname='*'
+    _acme-challenge.host.example.com. 1800 IN CNAME _acme-challenge.dns.example.net.
+
+Generate CNAMEs for www.example.net, example.net, host2.example.net that
+redirect to dns.example.net.  These will be unique with the cert. host in
+the target name.  Use --hash for randomized hash names in the target name.
+
+    acme_token_check --cnames="www,.,host2" example.net \
+                     --target=dns.example.net
+    _acme-challenge.host2.example.net. 1800 IN CNAME _acme-challenge.host2.example.net.dns.example.net.
+    _acme-challenge.www.example.net. 1800 IN CNAME _acme-challenge.www.example.net.dns.example.net.
+    _acme-challenge.example.net. 1800 IN CNAME _acme-challenge.example.net.dns.example.net.
+    3 acme challenge cnames generated
+
+    acme_token_check --cnames="www,.,host2" example.net \
+                     --target=dns.example.net --hash=8
+    _acme-challenge.www.example.net. 1800 IN CNAME _acme-challenge.a6ac7a77.dns.example.net.
+    _acme-challenge.host2.example.net. 1800 IN CNAME _acme-challenge.c4f3ca34.dns.example.net.
+    _acme-challenge.example.net. 1800 IN CNAME _acme-challenge.fff44f14.dns.example.net.
+    3 acme challenge cnames generated
+
+Generate the same CNAMEs, but all target a single server name.
+
+    acme_token_check --cnames="www,.,host2" example.net \
+                     --target=dns.example.net --nounique
+    _acme-challenge.example.net. 1800 IN CNAME _acme-challenge.dns.example.net.
+    _acme-challenge.host2.example.net. 1800 IN CNAME _acme-challenge.dns.example.net.
+    _acme-challenge.www.example.net. 1800 IN CNAME _acme-challenge.dns.example.net.
+    3 acme challenge cnames generated
+
+Generate CNAMEs for www, mail, and webmail for example.us, example.info,
+and example.fr. Since the nameserver supports RFC2136 dynamic update, install them.
+
+    acme_token_check example.fr example.us example.info \
+                     --cnames="www,mail,webmail"\
+                     --target=dns.example.net --hash=8 --install \
+                     --source-address=192.0.2.15
+    _acme-challenge.mail.example.info. 1800 IN CNAME _acme-challenge.f220d62d.dns.example.net.
+    _acme-challenge.webmail.example.info. 1800 IN CNAME _acme-challenge.aa6364c6.dns.example.net.
+    _acme-challenge.www.example.info. 1800 IN CNAME _acme-challenge.5bfb0c72.dns.example.net.
+    _acme-challenge.mail.example.fr. 1800 IN CNAME _acme-challenge.4314e798.dns.example.net.
+    _acme-challenge.webmail.example.fr. 1800 IN CNAME _acme-challenge.95d60169.dns.example.net.
+    _acme-challenge.www.example.fr. 1800 IN CNAME _acme-challenge.f827a766.dns.example.net.
+    _acme-challenge.mail.example.us. 1800 IN CNAME _acme-challenge.764c032e.dns.example.net.
+    _acme-challenge.webmail.example.us. 1800 IN CNAME _acme-challenge.6a3e68e9.dns.example.net.
+    _acme-challenge.www.example.us. 1800 IN CNAME _acme-challenge.7b360ab3.dns.example.net.
+    9 acme challenge cnames installed
+
+Scan and delete tokens in all zones served by a BIND nameserver, except reverse zones.
+
+    acme_token_check --named-address=dns3.example.net:8053  --view=external
+                     --remove --tsig-key=/etc/my.key
 
 =head1 RETURN VALUE
 
@@ -366,6 +923,14 @@ The exit code provides summary status.  Values are ORed if more than one applies
 =item 4 A DNS server refused to delete a challenge token record.
 
 =item 8 A DNS server did not return a reply to a delete request.
+
+=item 16 A challenge token CNAME was found.
+
+=item 32 A DNS server refused to add a challenge CNAME.
+
+=item 64 A DNS server did not return a reply to a request to add a CNAME.
+
+=item 128 A query to obtain the primary server for a zone faile.
 
 =item 255 Error in command or unhandled error from a module.
 
@@ -388,7 +953,7 @@ Timothe Litt  E<lt>litt@acm.orgE<gt>
 
 =head1 COPYRIGHT and LICENSE
 
-Copyright (c) 2023 Timothe Litt
+Copyright (c) 2021-2024 Timothe Litt
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),

@@ -266,7 +266,7 @@ event that the project moves, contact the author directly.
 
 # AUTHOR
 
-Timothe Litt  &lt;litt@acm.org>
+Timothe Litt  <litt@acm.org>
 
 # COPYRIGHT and LICENSE
 
