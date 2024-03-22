@@ -198,10 +198,12 @@ See LICENSE for license.
 
 ## acme_token_check
 
-Reports, and optionally removes `_acme-challenge` TXT records from the DNS.
+Reports, and optionally removes `_acme-challenge` TXT/CNAME records from the DNS.
 
-These can be left-over from ACME-based certificate issuance, when the tools
-or systems that they run on fail.
+The TXT records can be left-over from ACME-based certificate issuance, when the
+tools or systems that they run on fail.  The CNAME records are used to redirect
+dns-01 verification of domain ownership from a non-dynamically updatable domain
+to one that is.
 
 Suitable to be run as a `cron` job.
 
