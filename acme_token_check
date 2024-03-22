@@ -175,16 +175,16 @@ if( defined $rectype ) {
     $remove  = 0;
 }
 
-$hash    = 32      if( defined $hash && $hash <= 0 );
-$hash    = 63      if( defined $hash && $hash > 63 );
-$unique  = 1       unless( defined $hash || defined $unique );
-$unique ||= $hash;
+@ns      = split( /, ?/, join( ',', @ns ) );
+@cnames  = split( /, ?/, join( ',', @cnames ) );
 $recurse = 1       unless( defined $recurse );
 $port    = 53      unless( defined $port );
 $srcport = 0       unless( defined $srcport );
 $ttl     = 30 * 60 unless( defined $ttl );
-@ns      = split( /, ?/, join( ',', @ns ) );
-@cnames  = split( /, ?/, join( ',', @cnames ) );
+$hash    = 32      if( defined $hash && $hash <= 0 );
+$hash    = 63      if( defined $hash && $hash > 63 );
+$unique  = 1       unless( defined $hash || defined $unique );
+$unique ||= $hash;
 
 # Get a list of zones from named's statistics channel if specified & no command line zones
 
