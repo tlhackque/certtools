@@ -4,7 +4,7 @@ use warnings;
 use strict;
 
 my $copyright = << 'COPYRIGHT';
-Copyright (C) 2021 - 2023 Timothe Litt <litt at acm.org>
+Copyright (C) 2021 - 2024 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
@@ -24,6 +24,7 @@ use File::Spec;
 use File::Temp;
 use Getopt::Long( qw/GetOptionsFromString :config bundling/ );
 use IO::Socket::IP;
+use Net::Ping;
 use POSIX( qw/mktime strftime/ );
 use Sys::Hostname;
 use Text::Abbrev;
@@ -53,6 +54,7 @@ sub formatVersion {
 my $tmpdir = File::Spec->tmpdir || '.';
 
 my $ostype = eval { require Perl::OSType; return Perl::OSType::os_type() } || 'Unix';
+my $ping   = Net::Ping->new( 'icmp', 5, 64 );
 my $havepss;
 
 # Duplicate / @loop detection
@@ -588,6 +590,21 @@ sub checkhost {
 
     if( defined $chain ) {
         return analyzeChain( [ $host, $port ], $chain, $haskey, $opts, $at, $atl );
+    }
+
+    {
+        my( $h, $p ) = split( /:/, $host, 2 );
+        my @sts = $ping->ping( $h, 5 );
+        unless( @sts ) {
+            printf STDERR ( "Invalid host name '$h'\n" ) if( $debug );
+            missingcert( $host, $port, [''], 'OFFLINE', "Invalid name or address" );
+            return;
+        }
+        unless( $sts[0] ) {
+            printf STDERR ( "No ping response from '$h' ($sts[2])\n" ) if( $debug );
+            missingcert( $host, $port, [''], 'OFFLINE', "No ping response $sts[2]" );
+            return;
+        }
     }
 
     foreach my $type ( @{ $opts->{type} } ) {
