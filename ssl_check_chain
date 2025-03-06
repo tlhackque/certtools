@@ -4,7 +4,7 @@ use warnings;
 use strict;
 
 my $copyright = << 'COPYRIGHT';
-Copyright (C) 2021-2022 Timothe Litt <litt at acm.org>
+Copyright (C) 2021-2025 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
@@ -67,7 +67,7 @@ my %tlsver = ( '1.1' => '-tls1_1', '1.2' => '-tls1_2', '1.3' => '-tls1_3', );
 
 # Option values
 my( $cafile, $cadir, $debug, $warn, $help, $man, $version, $starttls, $timeout,
-    $tlsver,
+    $tlsver, $ipversion,
     $type );
 
 # Execute command & print unexpected errors
@@ -81,10 +81,9 @@ sub docmd {
         if( $? == -1 ) {
             printf STDERR ( "failed to execute %s: $!\n", $cmd );
         } elsif( $? & 127 ) {
-            printf STDERR (
-                    "%s died with signal %s (%d), %s coredump\n", $cmd,
-                    ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                    ( $? & 128 ) ? 'with' : 'without' );
+            printf STDERR ( "%s died with signal %s (%d), %s coredump\n", $cmd,
+                            ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                            ( $? & 128 ) ? 'with' : 'without' );
         } elsif( $_[1] ne 'verify' ) {
             printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
@@ -116,8 +115,9 @@ sub pdelta {
     if( $d2g > 366 ) {
         $y2g = sprintf( " (%.2f years)", $d2g / 365 );
     }
-    return sprintf( $text, $d2g, $y2g,
-                    strftime( '%a %d-%b-%Y at %T %Z', localtime( $date ) ) );
+    return
+        sprintf( $text, $d2g, $y2g,
+                 strftime( '%a %d-%b-%Y at %T %Z', localtime( $date ) ) );
 }
 
 # Produce a string describing where something was specified
@@ -139,10 +139,11 @@ sub tildename {
         if( $ostype eq 'Unix' ) {
             my $user = length $1 ? $1 : getlogin();
             my $dir  = ( getpwnam( $user ) )[7];
-            die(  sprintf(
-                      "~%s/%s: %s has no home directory, specified %s\n", $1, $filename,
-                      $user,
-                      atloc( $at, $atl ) ) )
+            die( sprintf( "~%s/%s: %s has no home directory, specified %s\n", $1,
+                          $filename,
+                          $user,
+                          atloc( $at, $atl )
+                ) )
                 unless( $dir );
             $filename = File::Spec->catfile( $dir, $filename );
         }
@@ -158,9 +159,8 @@ sub readfile {
     $$header = 1;
     $name    = tildename( $name, $at, $atl );
     unless( defined $name ) {
-        printf STDERR (
-                "Skipping unresolvable filename %s, specified %s\n", $_[0],
-                atloc( $at, $atl ) )
+        printf STDERR ( "Skipping unresolvable filename %s, specified %s\n", $_[0],
+                        atloc( $at, $atl ) )
             if( $warn );
         return;
     }
@@ -181,9 +181,8 @@ sub readfile {
         }
         close( $fh );
         unless( $chain =~ /^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE/m ) {
-            die(  sprintf(
-                      "No certificates found in %s, specified %s\n", $name,
-                      atloc( $at, $atl ) ) );
+            die( sprintf( "No certificates found in %s, specified %s\n", $name,
+                          atloc( $at, $atl ) ) );
         }
         ( my $haskey ) = $chain =~ /^-{2,8}BEGIN (RSA|EC) PRIVATE KEY/m;
         return ( $chain, $haskey );
@@ -197,13 +196,13 @@ sub atfile {
     my( $host, $fn, $header, $first, $at, $atl ) = @_;
 
     $fn = tildename( $fn, $at, $atl );
-    die(  sprintf("Unresolvable \@filename %s, specified %s\n", $_[1], atloc( $at, $atl )
-                 ) )
+    die( sprintf( "Unresolvable \@filename %s, specified %s\n", $_[1], atloc( $at, $atl )
+        ) )
         unless( defined $fn );
     if( $atfiles{$fn} ) {
         printf STDERR (
-                "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
-                $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
+                     "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
+                     $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
             if( $warn );
         $atfiles{$fn} = atloc( $at, $atl );
         return;
@@ -253,23 +252,23 @@ sub checkhost {
                 ( $chain, $haskey ) = readfile( $name, $header, $at, $atl );
                 return unless( $chain );
             } else {
-                die(  sprintf(
+                die( sprintf(
 "\"%s\" is not a known port name for %s, specified %s, see /etc/services\n",
-                          $pn, $name, atloc( $at, $atl ) ) );
+                    $pn, $name, atloc( $at, $atl ) ) );
             }
         }
     } elsif( $starttls =~ /^-starttls (.*)$/ && ( $port = $starttls{$1} ) ) {
         $host .= ":$port";
     } else {
-        $port = 443;
+        $port  = 443;
         $host .= ":$port";
     }
     if( $port ne 'FILE' ) {
         if( ( my $prev = $hosts{$host} ) ) {
             printf STDERR (
-                    "Skipping duplicate host \"%s\" %s, previously specified %s\n", $host,
-                    atloc( $at, $atl ),                                             $prev
-                          )
+                          "Skipping duplicate host \"%s\" %s, previously specified %s\n",
+                          $host,
+                          atloc( $at, $atl ), $prev )
                 if( $warn );
             $hosts{$host} = atloc( $at, $atl );
             return;
@@ -279,15 +278,15 @@ sub checkhost {
 
     unless( defined $chain ) {
         my $cmd =
-            "openssl s_client $CAcerts $starttls -showcerts $tlsver $type -connect $host";
+"openssl s_client$ipversion $CAcerts $starttls -showcerts $tlsver $type -connect $host";
         printf STDERR ( ">> %s\n", $cmd ) if( $debug );
         my( $cpid, $waitpid );
         eval {
             my( $saveout, $saveerr );
             open( $saveout, ">&STDOUT" );
             open( $saveerr, ">&STDERR" );
-            $chain = File::Temp->new(  DIR    => $tmpdir, TEMPLATE => "checkchain-XXXXXX",
-                                       SUFFIX => '.txt',  UNLINK   => 1 );
+            $chain = File::Temp->new(     DIR => $tmpdir, TEMPLATE => "checkchain-XXXXXX",
+                                          SUFFIX => '.txt', UNLINK => 1 );
             open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
             open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
             local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
@@ -340,16 +339,35 @@ sub checkhost {
                     if( $? == -1 ) {
                         printf STDERR ( "failed to execute %s: $!\n", $cmd );
                     } elsif( $? & 127 ) {
-                        printf STDERR (
-                                "%s died with signal %s (%d), %s coredump\n", $cmd,
-                                ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                                ( $? & 128 ) ? 'with' : 'without' );
+                        printf STDERR ( "%s died with signal %s (%d), %s coredump\n",
+                                        $cmd,
+                                        ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                                        ( $? & 128 ) ? 'with' : 'without' );
                     } else {
                         printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
                     }
                 }
             }
-            printf STDERR ( "TLS connection to %s was not successful\n", $host );
+            my $reason;
+            if( $chain =~ /\b(Name or service not known)\b/ ) {
+                $reason = $1;
+            } elsif( $chain =~ /\berrno=(\d+)/m ) {
+                local $! = $1;
+                $reason = $!;
+            } elsif( $chain =~ /\balert handshake failure\b/ ) {
+                $reason = "TLS handshake error";
+            } else {
+                $reason =
+                    $? == -1 ? "Failed to run openssl: $!"
+                    : "openssl s_client exited with" .
+                    ( ( $? & 127 ) ? " Signal" . ( $signo[ $? & 127 ] || ( $? & 127 ) )
+                        : '' ) .
+                    ' exit code:' .
+                    ( $? >> 8 );
+            }
+
+            printf STDERR ( "TLS connection to %s was not successful\n - %s\n", $host,
+                            $reason );
             return;
         }
         return unless( $chain );
@@ -362,15 +380,14 @@ sub checkhost {
 
         my $untrusted = '';
         for( my $i = 0; $i < @chain; ++$i ) {
-            my $file = File::Temp->new(
-                                    DIR    => $tmpdir, TEMPLATE => "checkchain-$i-XXXXXX",
-                                    SUFFIX => '.pem',  UNLINK   => 1 );
+            my $file = File::Temp->new( DIR      => $tmpdir,
+                                        TEMPLATE => "checkchain-$i-XXXXXX",
+                                        SUFFIX   => '.pem', UNLINK => 1 );
             $cert{$i}{file} = $file;
             print $file ( $chain[$i] );
             $file->flush;
-            my $state = docmd(
-                    "openssl ",           "x509",
-                    " -noout -text -in ", "$file\n" );
+            my $state = docmd( "openssl ",           "x509",
+                               " -noout -text -in ", "$file\n" );
             $cert{$i}{subject} = $1 if( $state =~ /^\s*Subject:\s*(.*?)$/m );
             $cert{$i}{issuer}  = $1 if( $state =~ /^\s*Issuer:\s*(.*?)$/m );
             $cert{$i}{start}   = str2time( $1, 'GMT' )
@@ -380,7 +397,7 @@ sub checkhost {
             $cert{$i}{key} = uc $1
                 if( $state =~
                 /^\s*Public Key Algorithm\s*:\s*(?:id-)?(.*?)(?:PublicKey|Encryption)?$/m
-                );
+                  );
             $cert{$i}{klen} = $1 if( $state =~ /^\s*(?:RSA )?Public-Key\s*:\s*(.*?)$/m );
 
             $untrusted .= sprintf( " -untrusted %s", "$file" ) if( $i > 0 );
@@ -390,35 +407,31 @@ sub checkhost {
             $text .= "\n" if( $i > 0 );
             $text .= sprintf( "Contains private %s key\n\n", $haskey )
                 if( $i == 0 && $haskey );
-            $text .= sprintf(
-                    "[%u] Subject: %s\n    Issuer : %s\n", $i, $cert{$i}{subject},
-                    $cert{$i}{issuer} );
+            $text .= sprintf( "[%u] Subject: %s\n    Issuer : %s\n", $i,
+                              $cert{$i}{subject},
+                              $cert{$i}{issuer} );
             $text .= sprintf( "    Type   : %s %s\n", $cert{$i}{key}, $cert{$i}{klen} );
             if( $now < $cert{$i}{start} || $now > $cert{$i}{end} ) {
                 $text .= "    Certificate is NOT valid at this time\n";
             }
             if( $now < $cert{$i}{start} ) {
-                $text .= sprintf(
-                        "    Certificate is not yet valid, will be %s\n",
-                        pdelta( $cert{$i}{start}, $now ) );
+                $text .= sprintf( "    Certificate is not yet valid, will be %s\n",
+                                  pdelta( $cert{$i}{start}, $now ) );
             } else {
-                $text .= sprintf(
-                        "    Certificate became valid %s\n",
-                        pdelta( $cert{$i}{start}, $now ) );
+                $text .= sprintf( "    Certificate became valid %s\n",
+                                  pdelta( $cert{$i}{start}, $now ) );
             }
             if( $now > $cert{$i}{end} ) {
-                $text .= sprintf(
-                        "    Certificate expired %s\n",
-                        pdelta( $cert{$i}{end}, $now ) );
+                $text .= sprintf( "    Certificate expired %s\n",
+                                  pdelta( $cert{$i}{end}, $now ) );
             } else {
-                $text .= sprintf(
-                        "    Certificate expires %s\n",
-                        pdelta( $cert{$i}{end}, $now ) );
+                $text .= sprintf( "    Certificate expires %s\n",
+                                  pdelta( $cert{$i}{end}, $now ) );
             }
 
-            my $state = docmd(
-                    "openssl ", "verify", " $CAcerts $untrusted ", $cert{$i}{file},
-                    " 2>&1\n" );
+            my $state = docmd( "openssl ", "verify", " $CAcerts $untrusted ",
+                               $cert{$i}{file},
+                               " 2>&1\n" );
             chomp $state;
 
             if( my( $subj, $err, $depth, $text ) =
@@ -448,7 +461,7 @@ sub checkhost {
             $header = "\n";
         }
         $header .= sprintf( "%s\n%s\n", $host, '-' x length( $host ) );
-        $text = $header . $text;
+        $text    = $header . $text;
     }
 
     print( $text );
@@ -456,18 +469,18 @@ sub checkhost {
 
 # Main program - Process command line options
 
-GetOptions(
-        "CAfile|C=s"     => \$cafile,
-        "CApath|CAdir=s" => \$cadir,
-        "debug|d!"       => \$debug,
-        "starttls|s=s"   => \$starttls,
-        "timeout=i"      => \$timeout,
-        "tlsversion|t=s" => \$tlsver,
-        "type|c=s"       => \$type,
-        "warnings!"      => \$warn,
-        'help|?|h'       => \$help,
-        'man'            => \$man,
-        'version'        => \$version,
+GetOptions( "CAfile|C=s"     => \$cafile,
+            "CApath|CAdir=s" => \$cadir,
+            "debug|d!"       => \$debug,
+            'ipversion|i=i'  => \$ipversion,
+            "starttls|s=s"   => \$starttls,
+            "timeout=i"      => \$timeout,
+            "tlsversion|t=s" => \$tlsver,
+            "type|c=s"       => \$type,
+            "warnings!"      => \$warn,
+            'help|?|h'       => \$help,
+            'man'            => \$man,
+            'version'        => \$version,
           ) or die( "Command line error, --help for usage\n" );
 if( $help || $man ) {
     eval {
@@ -489,8 +502,15 @@ $warn = 1 unless( defined $warn );
 
 # Default and/or convert option values for use
 
+if( defined $ipversion ) {
+    die( sprintf( "--ipversion must be 4 or 6, not %s\n", $ipversion ) )
+        unless( $ipversion =~ /^[46]$/ );
+    $ipversion = " -$ipversion";
+} else {
+    $ipversion = '';
+}
 if( defined $cafile || defined $cadir ) {
-    $CAcerts = '';
+    $CAcerts  = '';
     $CAcerts .= " -CAfile $cafile"
         if( defined $cafile );
     $CAcerts .= " -CApath $cadir"
@@ -568,6 +588,7 @@ ssl_check_chain [options] [host[:port] ...] [file:FILE] [@file...]
  Options:
    --CAfile=file     Specify bundle file of trusted CA certificates for verification
    --CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
+   --ipversion=n     Restrict connection to IP version 4 or 6
    --starttls=proto  Specify that STARTTLS should be used in the connection.
    --timeout=secs    Specify timeout for TLS connections
    --tlsversion=ver  Specify the version TLS to connect with
@@ -594,6 +615,10 @@ If not specified, the environment variables SSL_CERT_FILE and CURL_CA_BUNDLE wil
 Specify a directory containing hashed links to one or more trusted CA certificates to verify the host's certificate chain.
 
 If not specified, the environment variable SSL_CERT_DIR will be tried.  If it is not set, OpenSSL's default will be used.
+
+=item B<--ipversion>-I<4|6> B<-i>
+
+Allows connection to only use the specified IP version.
 
 =item B<--starttls>=I<protocol> B<-s>
 
@@ -679,7 +704,7 @@ Timothe Litt  E<lt>litt@acm.orgE<gt>
 
 =head1 COPYRIGHT and LICENSE
 
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2021-2025 Timothe Litt
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
