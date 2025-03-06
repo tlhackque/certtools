@@ -4,7 +4,7 @@ use warnings;
 use strict;
 
 my $copyright = << 'COPYRIGHT';
-Copyright (C) 2021 - 2024 Timothe Litt <litt at acm.org>
+Copyright (C) 2021 - 2025 Timothe Litt <litt at acm.org>
 Use --man for license information.
 COPYRIGHT
 
@@ -77,73 +77,78 @@ sub addnote {
 }
 
 my @columns = (
-        { name => 'Host',   from => 'host', width => 35, wrap => 1, class => 'host', },
-        { name => 'Issuer', from => 'issuer_d', width => 17, class => 'issuer' },
-        {  name => 'Type',
-           from => sub {
-               my $cert = shift;
-               my $type = $cert->{key};
-               $type .= "-$1" if( $cert->{klen} && $cert->{klen} =~ /(\d+)/ );
-               return $type;
-           },
-           width => 8,
-           class => 'type', },
-        {  name  => 'Status',
-           from  => 'status',
-           width => 8,
-           class => 'status',
-           match => { VALID   => 'valid',   INVALID => 'invalid', NOVERIFY => 'noverify',
-                      EXPIRED => 'expired', MISSING => 'missing', OFFLINE  => 'offline',
-                      NotYet  => 'pending' },
-        },
-        {  name => 'Expires',
-           from => sub {
-               my $cert = shift;
-               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
-               return date( $cert, 'end' );
-           },
-           class => 'expires date',
-           width => 11 },
-        {  name => 'Days',
-           from => sub {
-               my $cert = shift;
-               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
-               return days( $cert, 'end', $now );
-           },
-           width => 5,
-           j     => 'r',
-           class => 'days',
-        },
-        {  name => 'Renews',
-           from => sub {
-               my $cert = shift;
-               return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
-               my $d2g =
-               pdelta( $cert->{end} + ( $cert->{renewbefore} * $day ), $now, 2 );
-               if( $d2g == 1 ) {
-                   return 'TOMORROW';
-               } elsif( $d2g == 0 ) {
-                   return 'TODAY';
-               } elsif( $d2g < 0 ) {
-                   return sprintf( "%5ud LATE", -$d2g > 99999 ? 99999 : -$d2g );
-               } else {
-                   return date( $cert, 'end', $cert->{renewbefore} );
-               }
-           },
-           class => 'renews date',
-           match => [ qr/\bLATE\b/ => 'late', TODAY => 'today', TOMORROW => 'tomorrow', ],
-           width => 11,
-        },
-        {  name => 'Notes',
-           from => sub {
-               my $txt = join( ',', @{ shift->{notes} } );
-               return $txt;
-           },
-           width => 1,
-           extra => 1,
-           class => 'notes',
-        },
-);
+                {  name  => 'Host', from => 'host', width => 35, wrap => 1,
+                   class => 'host', },
+                {  name => 'Issuer', from => 'issuer_d', width => 17, class => 'issuer' },
+                {  name => 'Type',
+                   from => sub {
+                       my $cert = shift;
+                       my $type = $cert->{key};
+                       $type .= "-$1" if( $cert->{klen} && $cert->{klen} =~ /(\d+)/ );
+                       return $type;
+                   },
+                   width => 8,
+                   class => 'type', },
+                {  name  => 'Status',
+                   from  => 'status',
+                   width => 8,
+                   class => 'status',
+                   match => { VALID    => 'valid', INVALID => 'invalid',
+                              NOVERIFY => 'noverify',
+                              EXPIRED  => 'expired', MISSING => 'missing',
+                              OFFLINE  => 'offline',
+                              NotYet   => 'pending' },
+                },
+                {  name => 'Expires',
+                   from => sub {
+                       my $cert = shift;
+                       return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
+                       return date( $cert, 'end' );
+                   },
+                   class => 'expires date',
+                   width => 11 },
+                {  name => 'Days',
+                   from => sub {
+                       my $cert = shift;
+                       return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
+                       return days( $cert, 'end', $now );
+                   },
+                   width => 5,
+                   j     => 'r',
+                   class => 'days',
+                },
+                {  name => 'Renews',
+                   from => sub {
+                       my $cert = shift;
+                       return '' if( $cert->{status} =~ /^(?:MISSING|OFFLINE)$/ );
+                       my $d2g =
+                       pdelta( $cert->{end} + ( $cert->{renewbefore} * $day ), $now, 2 );
+                       if( $d2g == 1 ) {
+                           return 'TOMORROW';
+                       } elsif( $d2g == 0 ) {
+                           return 'TODAY';
+                       } elsif( $d2g < 0 ) {
+                           return sprintf( "%5ud LATE", -$d2g > 99999 ? 99999 : -$d2g );
+                       } else {
+                           return date( $cert, 'end', $cert->{renewbefore} );
+                       }
+                   },
+                   class => 'renews date',
+                   match => [ qr/\bLATE\b/ => 'late', TODAY => 'today',
+                              TOMORROW     => 'tomorrow',
+                            ],
+                   width => 11,
+                },
+                {  name => 'Notes',
+                   from => sub {
+                       my $txt = join( ',', @{ shift->{notes} } );
+                       return $txt;
+                   },
+                   width => 1,
+                   extra => 1,
+                   class => 'notes',
+                },
+              );
 
 sub findCols {
     my( $cols ) = @_;
@@ -166,20 +171,20 @@ my( @summary, @expired, @invalid, @renewals );
 
 # Contents of report sections
 my( @contentOrder, %contents ) = (
-       [  summary => { cols => [qw/host issuer type status expires days renews notes/],
-                       data => \@summary } ],
-       [  expired => { cols => [qw/host issuer type status expires days notes/],
-                       data => \@expired } ],
-       [  invalid => { cols => [qw/host issuer type status expires days notes/],
-                       data => \@invalid } ],
-       [  renewals => { cols => [qw/host issuer type status expires days renews notes/],
-                        data => \@renewals } ] );
+         [ summary => { cols => [qw/host issuer type status expires days renews notes/],
+                        data => \@summary } ],
+         [  expired => { cols => [qw/host issuer type status expires days notes/],
+                         data => \@expired } ],
+         [  invalid => { cols => [qw/host issuer type status expires days notes/],
+                         data => \@invalid } ],
+         [  renewals => {cols => [qw/host issuer type status expires days renews notes/],
+                         data => \@renewals } ] );
 
 sub date {
     my( $cert, $from, $offset ) = @_;
 
     $offset ||= 0;
-    $from = $cert->{$from};
+    $from     = $cert->{$from};
     return $from if( $from !~ /^\d+$/ );
 
     return strftime( '%d-%b-%Y', localtime( $from + ( $offset * $day ) ) );
@@ -207,10 +212,9 @@ sub docmd {
         if( $? == -1 ) {
             printf STDERR ( "failed to execute %s: $!\n", $cmd );
         } elsif( $? & 127 ) {
-            printf STDERR (
-                    "%s died with signal %s (%d), %s coredump\n", $cmd,
-                    ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                    ( $? & 128 ) ? 'with' : 'without' );
+            printf STDERR ( "%s died with signal %s (%d), %s coredump\n", $cmd,
+                            ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                            ( $? & 128 ) ? 'with' : 'without' );
         } elsif( $_[1] ne 'verify' ) {
             printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
         }
@@ -251,8 +255,9 @@ sub pdelta {
     } else {
         my $text = $past ? "%u days%s ago, on %s" : "in %d days%s, on %s";
 
-        return sprintf( $text, $delta, $y2g,
-                        strftime( '%a %d-%b-%Y %T %Z', localtime( $date ) ) );
+        return
+            sprintf( $text, $delta, $y2g,
+                     strftime( '%a %d-%b-%Y %T %Z', localtime( $date ) ) );
     }
 }
 
@@ -292,9 +297,8 @@ sub readfile {
 
     $name = tildename( $name, $at, $atl );
     unless( defined $name ) {
-        printf STDERR (
-                "Skipping unresolvable filename %s, specified %s\n", $_[0],
-                atloc( $at, $atl ) )
+        printf STDERR ( "Skipping unresolvable filename %s, specified %s\n", $_[0],
+                        atloc( $at, $atl ) )
             if( $warn );
         return;
     }
@@ -315,9 +319,8 @@ sub readfile {
         }
         close( $fh );
         unless( $chain =~ /^-{2,8}BEGIN (?:TRUSTED )?CERTIFICATE/m ) {
-            printf STDERR (
-                    "Skipping %s, specified %s: No certificates found\n", $name,
-                    atloc( $at, $atl ) );
+            printf STDERR ( "Skipping %s, specified %s: No certificates found\n", $name,
+                            atloc( $at, $atl ) );
             return;
         }
         ( my $haskey ) = $chain =~ /^-{2,8}BEGIN (RSA|EC) PRIVATE KEY/m;
@@ -336,8 +339,8 @@ sub atfile {
         unless( defined $fn );
     if( $atfiles{$fn} ) {
         printf STDERR (
-                "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
-                $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
+                     "Skipping redundant use of %s => %s %s.  The previous use was %s\n",
+                     $host, $fn, atloc( $at, $atl ), $atfiles{$fn} )
             if( $warn );
         $atfiles{$fn} = atloc( $at, $atl );
         return;
@@ -446,9 +449,8 @@ sub analyzeChain {
         $cert{$i}{host}        = $host->[0];
         $cert{$i}{port}        = $host->[1];
         $cert{$i}{renewbefore} = $opts->{renewbefore};
-        my $state = docmd(
-                "openssl ",                              "x509",
-                " -nameopt multiline -noout -text -in ", "$file\n" );
+        my $state = docmd( "openssl ",                              "x509",
+                           " -nameopt multiline -noout -text -in ", "$file\n" );
 
         if( my( $spc, $issuer ) = $state =~ /^(\s*)Issuer:\n(.*?)^\1[[:alpha:]]/ms ) {
             $cert{$i}{issuer} = $issuer;
@@ -496,9 +498,9 @@ sub analyzeChain {
     }
 
     for( my $i = 0; $i < @chain; ++$i ) {
-        my $state = docmd(
-                "openssl ", "verify", " $opts->{CAcerts} $untrusted ", $cert{$i}{file},
-                " 2>&1\n" );
+        my $state = docmd( "openssl ", "verify", " $opts->{CAcerts} $untrusted ",
+                           $cert{$i}{file},
+                           " 2>&1\n" );
         chomp $state;
 
         if( my( $subj, $err, $depth, $text ) =
@@ -566,21 +568,22 @@ sub checkhost {
                 ( $chain, $haskey ) = readfile( $name, $at, $atl );
                 return unless( $chain );
             } else {
-                dief(  "\"%s\" is not a known port name for %s, specified %s, see /etc/services\n",
-                      $pn, $name, atloc( $at, $atl ) );
+                dief(
+"\"%s\" is not a known port name for %s, specified %s, see /etc/services\n",
+                    $pn, $name, atloc( $at, $atl ) );
             }
         }
     } elsif( $opts->{starttls} && ( $port = $opts->{starttls}[1] ) ) {
         $host .= ":$port";
     } else {
-        $port = 443;
+        $port  = 443;
         $host .= ":$port";
     }
     if( $port ne 'FILE' ) {
         if( ( my $prev = $hosts{$host} ) ) {
             printf STDERR (
-                    "Skipping duplicate host \"%s\" %s, previously specified %s\n",
-                    $host, atloc( $at, $atl ), $prev )
+                          "Skipping duplicate host \"%s\" %s, previously specified %s\n",
+                          $host, atloc( $at, $atl ), $prev )
                 if( $warn );
             $hosts{$host} = atloc( $at, $atl );
             return;
@@ -608,16 +611,17 @@ sub checkhost {
     }
 
     foreach my $type ( @{ $opts->{type} } ) {
-        my $cmd = "openssl s_client $opts->{CAcerts} $opts->{starttls}[0] -showcerts " .
-            "$opts->{tlsversion}[0] $type->[0] -connect $host";
+        my $cmd =
+"openssl s_client$opts->{ipversion} $opts->{CAcerts} $opts->{starttls}[0] -showcerts "
+            . "$opts->{tlsversion}[0] $type->[0] -connect $host";
         printf STDERR ( ">> %s\n", $cmd ) if( $debug );
         my( $cpid, $waitpid );
         eval {
             my( $saveout, $saveerr );
             open( $saveout, ">&STDOUT" );
             open( $saveerr, ">&STDERR" );
-            $chain = File::Temp->new(   DIR    => $tmpdir, TEMPLATE => "sslstatus-XXXXXX",
-                                        SUFFIX => '.txt',  UNLINK   => 1 );
+            $chain = File::Temp->new(     DIR => $tmpdir, TEMPLATE => "sslstatus-XXXXXX",
+                                          SUFFIX => '.txt', UNLINK => 1 );
             open( STDOUT, ">&" . fileno( $chain ) ) or die( "open1: $!\n" );
             open( STDERR, ">&" . fileno( $chain ) ) or die( "open2: $!\n" );
             local $SIG{ALRM} = sub { kill 'KILL', $cpid; die( "timeout!\n" ) };
@@ -671,19 +675,30 @@ sub checkhost {
                     if( $? == -1 ) {
                         printf STDERR ( "failed to execute %s: $!\n", $cmd );
                     } elsif( $? & 127 ) {
-                        printf STDERR (
-                                "%s died with signal %s (%d), %s coredump\n", $cmd,
-                                ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
-                                ( $? & 128 ) ? 'with' : 'without' );
+                        printf STDERR ( "%s died with signal %s (%d), %s coredump\n",
+                                        $cmd,
+                                        ( $signo[ $? & 127 ] || '??' ), ( $? & 127 ),
+                                        ( $? & 128 ) ? 'with' : 'without' );
                     } else {
                         printf STDERR ( "%s exited with value %d\n", $cmd, $? >> 8 );
                     }
                 }
             }
-            my $note =
-                  $chain =~ /\balert handshake failure\b/ ? "TLS handshake error"
-                : $? == -1                                ? "Execute: $!"
-                :                                           "exit: $?";
+            my $note;
+            if( $chain =~ /\berrno=(\d+)/m ) {
+                local $! = $1;
+                $note = $!;
+            } elsif( $chain =~ /\balert handshake failure\b/ ) {
+                $note = "TLS handshake error";
+            } else {
+                $note =
+                    $? == -1 ? "Execute: $!"
+                    : "exit:" .
+                    ( ( $? & 127 )
+                        ? " Sig" . ( $signo[ $? & 127 ] || ( $? & 127 ) ) . ' code:'
+                        : '' ) .
+                    ( $? >> 8 );
+            }
             missingcert( $host, $port, $type, 'MISSING', $note );
             next;
         }
@@ -705,20 +720,17 @@ sub genTextReport {
     $width = length( $name ) if( length( $name ) > $width );
 
     my $pad = ' ' x ( int( ( $width - length $name ) / 2 ) );
-    printf $out (
-            "%s%s\n%s%s\n\n", $pad, ucfirst( $name ), $pad,
-            '-' x length( $name ) );
+    printf $out ( "%s%s\n%s%s\n\n", $pad, ucfirst( $name ), $pad,
+                  '-' x length( $name ) );
 
     foreach my $col ( @$columns ) {
         $col->{width} = length $col->{name} if( length $col->{name} > $col->{width} );
-        printf $out (
-                "%-*s%s", $col->{width}, $col->{name},
-                ( $col->{last} ? "\n" : ' ' ) );
+        printf $out ( "%-*s%s", $col->{width}, $col->{name},
+                      ( $col->{last} ? "\n" : ' ' ) );
     }
     foreach my $col ( @$columns ) {
-        printf $out (
-                "%-*s%s", $col->{width}, '-' x $col->{width},
-                ( $col->{last} ? "\n" : ' ' ) );
+        printf $out ( "%-*s%s", $col->{width}, '-' x $col->{width},
+                      ( $col->{last} ? "\n" : ' ' ) );
     }
 
     my $phost;
@@ -824,15 +836,13 @@ sub genHtmlReport {
 sub genHTML {
     my( $html, $title, $style ) = @_;
     my $nl = $debug ? "\n" : '';
-    my @tags = (
-            '<!DOCTYPE html>',
-            '<head>',
-            '<meta charset="iso-8859-1">',
-            sprintf(
-                "<meta name=\"generator\" content=\"%s %s\">", $prog,
-                formatVersion( $VERSION ) ),
-            '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
-    );
+    my @tags = ('<!DOCTYPE html>',
+                '<head>',
+                '<meta charset="iso-8859-1">',
+                sprintf( "<meta name=\"generator\" content=\"%s %s\">", $prog,
+                         formatVersion( $VERSION ) ),
+                '<meta name="viewport" content="width=device-width, initial-scale=1.0">',
+               );
     push @tags, "<title>$title</title>"    if( $title );
     push @tags, "<style>$nl$style</style>" if( $style );
     push @tags, '</head>', '<body>';
@@ -857,9 +867,8 @@ Content-Type: multipart/alternative;
     boundary="$boundary[0]"
 MIME-Version: 1.0
 MIMEHDR
-        $body .= join(
-                '',
-                << "PART", encode_qp( ref $text ? $$text : $text ) );
+        $body .= join( '',
+                       << "PART", encode_qp( ref $text ? $$text : $text ) );
 This is a multi-part message in MIME format.
 
 --$boundary[0]
@@ -911,12 +920,12 @@ sub modver {
     foreach my $mod ( sort keys %$seen ) {
         next unless( defined $seen->{$mod} );
         if( $pos >= 60 ) {
-            $pos = 0;
+            $pos   = 0;
             $mods .= "\n";
         }
         my $ver = sprintf( " %s/%s", $mod, $seen->{$mod} );
         $mods .= $ver;
-        $pos += length $ver;
+        $pos  += length $ver;
     }
 
     return $mods;
@@ -979,7 +988,8 @@ sub sendmsg {
             };
         if( $debug ) {
             my $host = eval {
-                sprintf("%s (%s)", IO::Socket::IP->join_addr( $smtp->peerhost_service ),
+                sprintf(     "%s (%s)",
+                             IO::Socket::IP->join_addr( $smtp->peerhost_service ),
                              IO::Socket::IP->join_addr( $smtp->peerhost_service( 1 ) ) );
             }
                 || $smtp->host;
@@ -991,9 +1001,8 @@ sub sendmsg {
                      && defined $smtp->supports( 'STARTTLS' ) )
             ) {
             unless( defined $smtp->supports( 'STARTTLS' ) ) {
-                printf STDERR (
-                        "STARTTLS attempted, but is not supported by %s\n",
-                        $smtp->host );
+                printf STDERR ( "STARTTLS attempted, but is not supported by %s\n",
+                                $smtp->host );
                 next;
             }
             $smtp->starttls( @ssl[ 0 .. -2 ] ) or do {
@@ -1043,7 +1052,7 @@ sub sendmsg {
         $msg->{BareFrom} = $from;
         my @real = eval { getpwuid( $< ) };
         if( @real && $real[6] ) {
-            my $real = $real[6];
+            my $real  = $real[6];
             $headers .= sprintf( "Full-Name: %s\n", $real );
             $real =~ s/(["()])/\\$1/g;
             $headers .= sprintf( "From: \"%s\" <%s>\n", $real, $from );
@@ -1058,9 +1067,8 @@ sub sendmsg {
         print STDERR ( "Recipient list not accepted\n" );
         return;
     };
-    $headers .= sprintf(
-            "To: %s\n",
-            join( ',', ref( $msg->{To} ) ? @{ $msg->{To} } : $msg->{To} ) );
+    $headers .= sprintf( "To: %s\n",
+                         join( ',', ref( $msg->{To} ) ? @{ $msg->{To} } : $msg->{To} ) );
     my $xm = sprintf( "X-Mailer: %s %s via", $prog, formatVersion( $VERSION ) );
     $headers .= $xm . modver( ref $smtp, length $xm ) . "\n";
     $headers .= sprintf( "Subject: %s\n", $msg->{Subject} ) if( $msg->{Subject} );
@@ -1093,12 +1101,11 @@ sub smtpfail {
     my $fh;
     for( my $i = 0; 1; ++$i ) {
         last if( $i >= @ARGV || $ARGV[$i] eq '--' );
-        if(
-            (      my( $no, $file ) =
-                   $ARGV[$i] =~ /^--(no-?)?ini(?:t(?:i(?:a(?:l(?:i(?:z(?:a(?:t
+        if( (  my( $no, $file ) =
+               $ARGV[$i] =~ /^--(no-?)?ini(?:t(?:i(?:a(?:l(?:i(?:z(?:a(?:t
                             (?:i(?:o(?:n)?(?:-(?:f(?:i(?:l(?:e)?)?)?)?)?)?
-                            )?)?)?)?)?)?)?)?)?(?:=(\S+))?$/ix )
-            ) {
+                            )?)?)?)?)?)?)?)?)?(?:=(\S+))?$/ix
+            ) ) {
             die( "Unknown option: $ARGV[$i]\n" ) if( $no && $file );
 
             $inifile = $no ? '' : $file;
@@ -1116,12 +1123,11 @@ sub smtpfail {
                       [ q(/etc/sysconfig) => qq($prog) ],
                       [ q(/etc/default)   => qq($prog) ] );
         } elsif( $ostype eq 'Windows' ) {
-            @locs = (
-                    [ '.' => qq(.${prog}.ini) ],
-                    [  File::Spec->catpath( @ENV{qw/HOMEDRIVE HOMEPATH/} ) =>
-                       qq(.${prog}.ini) ],
-                    [ $ENV{SSLSTATUS} => qq(${prog}.ini) ],
-            );
+            @locs = ( [ '.' => qq(.${prog}.ini) ],
+                      [  File::Spec->catpath( @ENV{qw/HOMEDRIVE HOMEPATH/} ) =>
+                         qq(.${prog}.ini) ],
+                      [ $ENV{SSLSTATUS} => qq(${prog}.ini) ],
+                    );
         } elsif( $ostype eq 'VMS' ) {
             @locs = ( [ $ENV{DEFAULT}      => qq(${prog}.ini) ],
                       [ $ENV{'SYS$LOGIN'}  => qq(${prog}.ini) ],
@@ -1160,21 +1166,23 @@ sub smtpfail {
 # debugging.
 
 {
-    my( $cafile, $cadir, $renews, $starttls, $timeout, $tlsver, @certtype );
+    my( $cafile, $cadir, $ipversion, $renews, $starttls, $timeout, $tlsver, @certtype );
 
-    @hostoptions = (
-            "CAfile=s"                            => \$cafile,
-            "no-CAfile|noCAfile"                  => sub { $cafile = '' },
-            "CApath|CAdir=s"                      => \$cadir,
-            "no-CApath|noCApath|no-CAdir|noCAdir" => sub { $cadir = '' },
-            "renewbefore=i"                       => \$renews,
-            "starttls=s"                          => \$starttls,
-            "no-starttls|nostarttls"              => sub { undef $starttls },
-            "tlsversion=s"                        => \$tlsver,
-            "no-tlsversion|notlsversion"          => sub { undef $tlsver },
-            "timeout=i"                           => \$timeout,
-            "type=s"                              => \@certtype,
-            "no-type|notype"                      => sub { @certtype = () },
+    @hostoptions = ( "CAfile=s"                            => \$cafile,
+                     "no-CAfile|noCAfile"                  => sub { $cafile = '' },
+                     "CApath|CAdir=s"                      => \$cadir,
+                     "no-CApath|noCApath|no-CAdir|noCAdir" => sub { $cadir = '' },
+                     'ipversion|ip-version=i'              => \$ipversion,
+                     'no-ip-version|noipversion'           => sub { undef $ipversion },
+                     'any-ip-version|anyipversion'         => sub { undef $ipversion },
+                     "renewbefore=i"                       => \$renews,
+                     "starttls=s"                          => \$starttls,
+                     "no-starttls|nostarttls"              => sub { undef $starttls },
+                     "tlsversion=s"                        => \$tlsver,
+                     "no-tlsversion|notlsversion"          => sub { undef $tlsver },
+                     "timeout=i"                           => \$timeout,
+                     "type=s"                              => \@certtype,
+                     "no-type|notype"                      => sub { @certtype = () },
                    );
 
     # Option values => OpenSSL options
@@ -1199,7 +1207,7 @@ sub smtpfail {
         my %vals;
         for( my $i = 0; $i < @hostoptions; $i += 2 ) {
             my( $opt, $val ) = @hostoptions[ $i, $i + 1 ];
-            next if( $opt =~ s/^no-// );
+            next if( ref $val eq 'CODE' );
             $opt =~ s/[:=!|].*$//;
             if( ref $val eq 'ARRAY' ) {
                 $vals{$opt} = [@$val];
@@ -1244,8 +1252,8 @@ sub smtpfail {
                 $name = 'ec' if( $name eq 'ecdsa' );
                 if( $seen{$name} ) {
                     printf STDERR (
-                            "Skipped duplicate certificate type %s, specified %s\n",
-                            $type, atloc( $at, $atl ) )
+                                 "Skipped duplicate certificate type %s, specified %s\n",
+                                 $type, atloc( $at, $atl ) )
                         if( $warn );
                     next;
                 }
@@ -1259,7 +1267,7 @@ sub smtpfail {
                         $havepss = $pkalgs =~ /^\s*PEM\sstring:\s*RSA-PSS\b/m;
                     }
                     if( $vals{tlsversion}[0] && $vals{tlsversion}[0] =~ /1_[3-9]$/ ) {
-                        dief(  "TLS 1.3 doesn't support '%s' certificates, specified %s\n",
+                        dief( "TLS 1.3 doesn't support '%s' certificates, specified %s\n",
                               $type, atloc( $at, $atl ) );
                     }
                     $cs =
@@ -1322,36 +1330,43 @@ sub smtpfail {
             }
             $vals{CAcerts} = $CAcerts;
         }
-
+        if( defined $vals{ipversion} ) {
+            unless( $vals{ipversion} =~ /^[46]$/ ) {
+                dief(  "--ipversion must be '4' or '6', not %s\n", $vals{ipversion},
+                       atloc( $at, $atl ) );
+            }
+            $vals{ipversion} = " -$vals{ipversion}";
+        } else {
+            $vals{ipversion} = '';
+        }
         return \%vals;
     }
-    @globaloptions = (
-            "debug|d!"                   => \$debug,
-            "brief!"                     => \$brief,
-            "email-from|e-mail-from=s"   => \$email_from,
-            "no-email-from|noemail-from" => sub { undef $email_from },
-            "email-to|e-mail-to=s"       => \@email_to,
-            "no-email|noemail"           => sub { @email_to = (); },
-            "format=s"                   => \$format,
-            "logo=s"                     => \$logo,
-            "no-logo|nologo"             => sub { $logo = '' },
-            "pretend-its=i"              => sub { $now += $_[1] * $day },
-            "select=s"                   => \@contents,
-            "smtp-server=s"              => \@smtp_servers,
-            "smtp-username=s"            => \$smtp_user,
-            "smtp-password=s"            => \$smtp_password,
-            'smtp-ssl-mode=s'            => \$smtp_ssl_mode,
-            "stylesheet=s"               => \$stylesheet,
-            "warnings!"                  => \$warn,
-            'help|?|h'                   => \$help,
-            'man'                        => \$man,
-            'version'                    => \$version,
+    @globaloptions = ( "debug|d!"                   => \$debug,
+                       "brief!"                     => \$brief,
+                       "email-from|e-mail-from=s"   => \$email_from,
+                       "no-email-from|noemail-from" => sub { undef $email_from },
+                       "email-to|e-mail-to=s"       => \@email_to,
+                       "no-email|noemail"           => sub { @email_to = (); },
+                       "format=s"                   => \$format,
+                       "logo=s"                     => \$logo,
+                       "no-logo|nologo"             => sub { $logo  = '' },
+                       "pretend-its=i"              => sub { $now  += $_[1] * $day },
+                       "select=s"                   => \@contents,
+                       "smtp-server=s"              => \@smtp_servers,
+                       "smtp-username=s"            => \$smtp_user,
+                       "smtp-password=s"            => \$smtp_password,
+                       'smtp-ssl-mode=s'            => \$smtp_ssl_mode,
+                       "stylesheet=s"               => \$stylesheet,
+                       "warnings!"                  => \$warn,
+                       'help|?|h'                   => \$help,
+                       'man'                        => \$man,
+                       'version'                    => \$version,
                      );
 }
-GetOptions( @globaloptions, @hostoptions ) or
-    dief(
-        "Command line error, --help for usage\n%s",
-        $inifile ? "Check $inifile for possible errors\n" : "" );
+GetOptions( @globaloptions, @hostoptions )
+    or
+    dief( "Command line error, --help for usage\n%s",
+          $inifile ? "Check $inifile for possible errors\n" : "" );
 printf STDERR ( "Read initial options from %s\n", $inifile )
     if( $debug && $inifile );
 
@@ -1936,6 +1951,8 @@ The validity dates of each certificate returned will be verified, as will its ch
 To request the desired certificate from  dual-certificate servers, you can specify B<--type>=I<ec> or B<--type>=I<rsa>.
 This is done by providing a list of acceptable signature algorithms; the connecion will fail if the server doesn't have a matching certificate.
 
+To restrict the server connection type, specify B<--ip-version=>I<4|6>
+
 You can also specify B<--tlsversion>=I<1.1>, B<--tlsversion>=I<1.2>, or B<--tlsversion>=I<1.3> to select the protocol version.
 
 Each certificate is analyzed in the order received from the server or contained in the file, which should be from leaf (the server) toward the root (trusted CA).
@@ -1982,7 +1999,7 @@ Timothe Litt  E<lt>litt@acm.orgE<gt>
 
 =head1 COPYRIGHT and LICENSE
 
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2021-2025 Timothe Litt
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
