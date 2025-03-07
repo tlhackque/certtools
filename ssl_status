@@ -440,6 +440,10 @@ sub analyzeChain {
         if( $i == 0 ) {
             $cert{$i}{notes} = [];
             addnote( $cert{$i}, 'Has private key' ) if( $haskey );
+            if( $chain =~ /^Verification error:\s*(.*)$/m ) {
+                $cert{$i}{status} ||= 'NOVERIFY';
+                addnote( $cert{$i}, ucfirst $1 );
+            }
         }
         my $file = File::Temp->new( DIR    => $tmpdir, TEMPLATE => "sslstatus-$i-XXXXXX",
                                     SUFFIX => '.pem',  UNLINK   => 1 );
