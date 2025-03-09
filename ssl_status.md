@@ -224,6 +224,8 @@ The validity dates of each certificate returned will be verified, as will its ch
 To request the desired certificate from  dual-certificate servers, you can specify **--type**=_ec_ or **--type**=_rsa_.
 This is done by providing a list of acceptable signature algorithms; the connecion will fail if the server doesn't have a matching certificate.
 
+To restrict the server connection type, specify **--ip-version=**_4|6_
+
 You can also specify **--tlsversion**=_1.1_, **--tlsversion**=_1.2_, or **--tlsversion**=_1.3_ to select the protocol version.
 
 Each certificate is analyzed in the order received from the server or contained in the file, which should be from leaf (the server) toward the root (trusted CA).
@@ -266,11 +268,11 @@ event that the project moves, contact the author directly.
 
 # AUTHOR
 
-Timothe Litt  <litt@acm.org>
+Timothe Litt  &lt;litt@acm.org>
 
 # COPYRIGHT and LICENSE
 
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2021-2025 Timothe Litt
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),

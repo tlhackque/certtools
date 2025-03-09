@@ -129,7 +129,7 @@
 .\" ========================================================================
 .\"
 .IX Title "SSL_CHECK_CHAIN 1"
-.TH SSL_CHECK_CHAIN 1 "21-Jan-2023" "" "Certificate Tools"
+.TH SSL_CHECK_CHAIN 1 "08-Mar-2025" "" "Certificate Tools"
 .\" For nroff, turn off justification.  Always turn off hyphenation; it makes
 .\" way too many mistakes in technical documents.
 .if n .ad l
@@ -141,10 +141,11 @@ ssl_check_chain \- check the certificate chain for hosts
 .IX Header "SYNOPSIS"
 ssl_check_chain [options] [host[:port] ...] [file:FILE] [@file...]
 .PP
-.Vb 10
+.Vb 11
 \& Options:
 \&   \-\-CAfile=file     Specify bundle file of trusted CA certificates for verification
 \&   \-\-CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
+\&   \-\-ipversion=n     Restrict connection to IP version 4 or 6
 \&   \-\-starttls=proto  Specify that STARTTLS should be used in the connection.
 \&   \-\-timeout=secs    Specify timeout for TLS connections
 \&   \-\-tlsversion=ver  Specify the version TLS to connect with
@@ -167,6 +168,9 @@ If not specified, the environment variables \s-1SSL_CERT_FILE\s0 and \s-1CURL_CA
 Specify a directory containing hashed links to one or more trusted \s-1CA\s0 certificates to verify the host's certificate chain.
 .Sp
 If not specified, the environment variable \s-1SSL_CERT_DIR\s0 will be tried.  If it is not set, OpenSSL's default will be used.
+.IP "\fB\-\-ipversion\fR\-\fI4|6\fR \fB\-i\fR" 8
+.IX Item "--ipversion-4|6 -i"
+Allows connection to only use the specified \s-1IP\s0 version.
 .IP "\fB\-\-starttls\fR=\fIprotocol\fR \fB\-s\fR" 8
 .IX Item "--starttls=protocol -s"
 Specifies that \s-1STARTTLS\s0 is required to make the \s-1TLS\s0 connection.
@@ -239,7 +243,7 @@ event that the project moves, contact the author directly.
 Timothe Litt  <litt@acm.org>
 .SH "COPYRIGHT and LICENSE"
 .IX Header "COPYRIGHT and LICENSE"
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2021\-2025 Timothe Litt
 .PP
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the \*(L"Software\*(R"),

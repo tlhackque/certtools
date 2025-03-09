@@ -9,6 +9,7 @@ ssl\_check\_chain \[options\] \[host\[:port\] ...\] \[file:FILE\] \[@file...\]
     Options:
       --CAfile=file     Specify bundle file of trusted CA certificates for verification
       --CApath=dir      Specify a hashed directory containing trusted CA certificates for verification.
+      --ipversion=n     Restrict connection to IP version 4 or 6
       --starttls=proto  Specify that STARTTLS should be used in the connection.
       --timeout=secs    Specify timeout for TLS connections
       --tlsversion=ver  Specify the version TLS to connect with
@@ -33,6 +34,10 @@ for compatibility with `ssl_info`
     Specify a directory containing hashed links to one or more trusted CA certificates to verify the host's certificate chain.
 
     If not specified, the environment variable SSL\_CERT\_DIR will be tried.  If it is not set, OpenSSL's default will be used.
+
+- **--ipversion**-_4|6_ **-i**
+
+    Allows connection to only use the specified IP version.
 
 - **--starttls**=_protocol_ **-s**
 
@@ -116,7 +121,7 @@ Timothe Litt  &lt;litt@acm.org>
 
 # COPYRIGHT and LICENSE
 
-Copyright (c) 2021 Timothe Litt
+Copyright (c) 2021-2025 Timothe Litt
 
 Permission is hereby granted, free of charge, to any person obtaining a
 copy of this software and associated documentation files (the "Software"),
