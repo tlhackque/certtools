@@ -440,7 +440,9 @@ sub checkhost {
             {
                 if( $subj eq $cert{$i}{issuer} ) {
                     $state =
-"Failed to verify issuer's certificate:\n  $subj\n  SSL error: $err : \"$text\" at depth $depth";
+"FAIL Unable to verify issuer's certificate:\n     $subj\n  SSL error: $err : \"$text\" at depth $depth";
+                } else {
+                    $state = "FAIL " . ucfirst( $text ) . " at depth $depth";
                 }
             }
             $state =~ s,$tmpdir/.*?\.pem: ,,g;
